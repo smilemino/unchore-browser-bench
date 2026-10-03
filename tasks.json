@@ -1,0 +1,189 @@
+[
+ {
+  "id": "c1",
+  "kind": "회사",
+  "start": "https://unchore.ai",
+  "goal": "언초어 요금 화면에서 가장 싼 유료 요금제의 한 달 값을 알려 줘",
+  "check": {
+   "url": "pricing",
+   "answer": "\\d"
+  }
+ },
+ {
+  "id": "c2",
+  "kind": "회사",
+  "start": "https://rlink.kr",
+  "goal": "이 쇼핑몰에서 '노벨'을 검색해서 나온 첫 상품 이름과 가격을 알려 줘",
+  "check": {
+   "answer": "노벨"
+  }
+ },
+ {
+  "id": "c3",
+  "kind": "회사",
+  "start": "https://rlink.kr",
+  "goal": "이 쇼핑몰 고객센터 전화번호를 찾아 알려 줘",
+  "check": {
+   "answer": "\\d{2,4}-\\d{3,4}(-\\d{4})?"
+  }
+ },
+ {
+  "id": "c4",
+  "kind": "회사",
+  "start": "https://unchore.ai",
+  "goal": "로그인 화면을 열어 줘(로그인은 하지 마)",
+  "check": {
+   "url": "unchore\\.ai/(login|signin)?$",
+   "answer": "로그인"
+  },
+  "note": "언초어 첫 화면이 로그인 단추(구글·깃허브)를 바로 보여 주므로 첫 화면도 정답"
+ },
+ {
+  "id": "c5",
+  "kind": "회사",
+  "start": "https://github.com/smilemino/unchore-malleable-ui",
+  "goal": "이 저장소 설명(README) 맨 위 제목이 무엇인지 알려 줘",
+  "check": {
+   "answer": "."
+  }
+ },
+ {
+  "id": "c6",
+  "kind": "회사",
+  "start": "https://kmong.com",
+  "goal": "크몽에서 'AI 자동화'를 검색해서 검색 결과 화면을 열어 줘",
+  "check": {
+   "url": "search|keyword"
+  }
+ },
+ {
+  "id": "c7",
+  "kind": "회사",
+  "start": "https://www.sabangnet.co.kr",
+  "goal": "사방넷 고객센터(대표) 전화번호를 알려 줘",
+  "check": {
+   "answer": "\\d{2,4}-\\d{3,4}(-\\d{4})?"
+  }
+ },
+ {
+  "id": "c8",
+  "kind": "회사",
+  "start": "https://rlink.kr",
+  "goal": "회원가입 화면을 열어 줘(가입은 하지 마)",
+  "check": {
+   "url": "join|signup|register|sign-up|agree"
+  }
+ },
+ {
+  "id": "c9",
+  "kind": "회사",
+  "start": "https://www.naver.com",
+  "goal": "네이버에서 '리퍼럴링크'를 검색하고 첫 검색 결과의 제목을 알려 줘",
+  "check": {
+   "url": "search\\.naver\\.com",
+   "answer": "."
+  }
+ },
+ {
+  "id": "c10",
+  "kind": "회사",
+  "start": "https://smilemino.github.io/unchore-malleable-ui/",
+  "goal": "이 시연 화면이 무엇을 하는 화면인지 한 문장으로 알려 줘",
+  "check": {
+   "answer": "."
+  }
+ },
+ {
+  "id": "g1",
+  "kind": "일반",
+  "start": "https://ko.wikipedia.org",
+  "goal": "위키백과에서 '서울특별시' 문서를 찾아 인구를 알려 줘",
+  "check": {
+   "url": "wiki",
+   "answer": "\\d"
+  }
+ },
+ {
+  "id": "g2",
+  "kind": "일반",
+  "start": "https://www.google.com",
+  "goal": "구글에서 'chromium release schedule' 을 검색해 줘",
+  "check": {
+   "url": "google\\.[a-z.]+/search",
+   "answer": "^(?!.*(캡차|CAPTCHA|비정상|사람인지|로봇)).*$"
+  }
+ },
+ {
+  "id": "g3",
+  "kind": "일반",
+  "start": "https://www.naver.com",
+  "goal": "네이버에서 서울 날씨를 찾아 지금 기온을 알려 줘",
+  "check": {
+   "answer": "°|도|℃"
+  }
+ },
+ {
+  "id": "g4",
+  "kind": "일반",
+  "start": "https://en.wikipedia.org",
+  "goal": "Find the Wikipedia article on Python (programming language) and tell me the year it first appeared",
+  "check": {
+   "answer": "1991"
+  }
+ },
+ {
+  "id": "g5",
+  "kind": "일반",
+  "start": "https://www.youtube.com",
+  "goal": "유튜브에서 '이루마 피아노'를 검색해 줘",
+  "check": {
+   "url": "results\\?search_query"
+  }
+ },
+ {
+  "id": "g6",
+  "kind": "일반",
+  "start": "https://news.ycombinator.com",
+  "goal": "해커 뉴스 첫 번째 글 제목을 알려 줘",
+  "check": {
+   "answer": "."
+  }
+ },
+ {
+  "id": "g7",
+  "kind": "일반",
+  "start": "https://demo.playwright.dev/todomvc/",
+  "goal": "할 일 목록에 '우유 사기', '편지 쓰기', '운동하기' 세 개를 넣고 '편지 쓰기'를 완료로 표시해 줘",
+  "check": {
+   "js": "(()=>{const li=[...document.querySelectorAll('.todo-list li')];return li.length>=3&&li.some(l=>l.classList.contains('completed')&&l.innerText.includes('편지'))})()"
+  }
+ },
+ {
+  "id": "g8",
+  "kind": "일반",
+  "start": "https://httpbin.org/forms/post",
+  "goal": "주문 양식에 이름 '홍길동', 전화 '010-1234-5678', 피자 크기 Medium, 토핑 Bacon 을 채워 줘. 마지막 제출 단추는 누르지 마",
+  "check": {
+   "js": "(()=>{const f=document.forms[0];return f&&f.custname.value.includes('홍길동')&&[...f.size].some(r=>r.checked&&r.value==='medium')&&[...f.topping].some(c=>c.checked&&c.value==='bacon')})()"
+  }
+ },
+ {
+  "id": "g9",
+  "kind": "일반",
+  "start": "https://duckduckgo.com",
+  "goal": "덕덕고에서 'unchore ai' 를 검색해 줘",
+  "check": {
+   "url": "[?&]q=unchore",
+   "answer": "^(?!.*(캡차|CAPTCHA|비정상|사람인지|로봇)).*$"
+  }
+ },
+ {
+  "id": "g10",
+  "kind": "일반",
+  "start": "https://github.com/chromium/chromium",
+  "goal": "이 저장소의 가장 최근 태그(tag) 이름 하나를 알려 줘",
+  "check": {
+   "answer": "\\d+\\.\\d+\\.\\d+"
+  }
+ }
+]
