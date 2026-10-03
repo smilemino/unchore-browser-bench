@@ -1,0 +1,35 @@
+name: aside-bench
+on:
+  workflow_dispatch:
+    inputs: { nonce: { required: true }, only: { required: false, default: "" } }
+permissions:
+  contents: write
+jobs:
+  compare:
+    runs-on: windows-2025
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and launch Aside
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://aside.com/api/download/windows -OutFile aside.exe
+          Start-Process .\aside.exe -ArgumentList '--silent','/S'
+          for ($i=0; $i -lt 60 -and -not (Test-Path 'C:\Program Files\Aside\Application\Aside.exe'); $i++) { Start-Sleep 5 }
+          Start-Sleep 20
+          Get-Process | Where-Object { $_.Name -match '^aside$' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Process 'C:\Program Files\Aside\Application\Aside.exe' -ArgumentList '--remote-debugging-port=9222','--no-first-run'
+          Start-Sleep 20
+          npm i puppeteer-core@24 --silent | Out-Null
+      - name: Drive
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}", NONCE: "${{ inputs.nonce }}", ONLY: "${{ inputs.only }}" }
+        run: |
+          node compare.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aside-bench
+          path: |
+            *.png
+            *.json
