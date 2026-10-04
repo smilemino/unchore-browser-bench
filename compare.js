@@ -47,7 +47,8 @@ async function login(b) {
       await dumpMain(b, 'ob-key2');
       const inp = await pg.$('input[type=password], input[placeholder*="key" i], input[name*="key" i]');
       if (inp && KEY) { await inp.click(); await inp.type(KEY, { delay: 5 }); console.log('KEYTYPED'); }
-      await sleep(800); const sv = await clickText(pg, '^(save|connect|add|add key|continue|verify|done)$'); console.log('KEYSAVE', sv); await sleep(6000);
+      await sleep(800); const sv = await clickText(pg, '^submit$'); console.log('KEYSAVE', sv); await sleep(6000); await dumpMain(b, 'ob-key2b');
+      for (let k = 0; k < 3; k++) { const gs = await clickText(pg, '^get started$'); console.log('FREEPLAN', k, gs); if (!gs) break; await sleep(5000); }
       await dumpMain(b, 'ob-key3'); if (!pg.url().includes('/onboarding/ai')) continue; if (i >= 5) break;
     }
     if (pg.url().includes('/onboarding/ai') && i >= 3) {
