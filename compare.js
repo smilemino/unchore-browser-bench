@@ -38,6 +38,17 @@ async function login(b) {
     if (pg.url().includes('/onboarding/ai')) { pick = await pg.evaluate(() => { const r = document.querySelector('input[type=radio]'); if (!r) return ''; (r.closest('label') || r.parentElement || r).click(); if (!r.checked) r.click(); return 'radio1 ' + r.checked; }).catch((e) => 'err ' + e);
       if (!/true/.test(pick)) { const h = await pg.$('input[type=radio]'); if (h) { const box = await h.boundingBox(); if (box) await pg.mouse.click(box.x + box.width / 2, box.y + box.height / 2); else { const lb = await h.evaluateHandle((e) => e.closest('label') || e.parentElement); await lb.asElement()?.click().catch(() => {}); } pick += ' mouse ' + await h.evaluate((e) => e.checked); } }
       await sleep(1500); }
+    if (pg.url().includes('/onboarding/ai') && i >= 3) {
+      if (!pg.__hooked) { pg.__hooked = 1; pg.on('console', (m) => console.log('CONSOLE', m.type(), mask(m.text()).slice(0, 300))); pg.on('response', (r) => { if (r.status() >= 400) console.log('NETERR', r.status(), r.url().replace(/[?#].*/, '').slice(0, 120)); }); pg.on('requestfailed', (r) => console.log('NETFAIL', r.url().replace(/[?#].*/, '').slice(0, 120), r.failure()?.errorText)); }
+      const lab = await pg.evaluateHandle(() => { const r = document.querySelector('input[type=radio]'); return r && (r.closest('label') || r.parentElement); });
+      const lb = lab.asElement(); if (lb) { const bx = await lb.boundingBox(); if (bx) await pg.mouse.click(bx.x + 20, bx.y + bx.height / 2); }
+      await sleep(800);
+      const cb = await pg.evaluateHandle(() => [...document.querySelectorAll('button')].find((x) => /^connect$/i.test(x.innerText.trim())));
+      const ce = cb.asElement(); const dis = ce ? await ce.evaluate((e) => e.disabled + ' ' + e.getAttribute('aria-disabled')) : 'none';
+      if (ce) { const bx = await ce.boundingBox(); if (bx) await pg.mouse.click(bx.x + bx.width / 2, bx.y + bx.height / 2); }
+      console.log('ONBOARD-MOUSE', i, 'connect', dis); await sleep(6000);
+      if (!pg.url().includes('/onboarding/ai')) continue;
+    }
     const c = await clickText(pg, '^(connect|skip|next|continue|done|get started|start|maybe later|not now|finish|got it|allow|start using aside|let.s go|start for free|continue with free|use free plan|free)$'); console.log('ONBOARD', i, pg.url().split('#')[1], pick, c); if (!c) { await dumpMain(b, 'ob'); break; }
     if (i >= 3 && pg.url().includes('/onboarding/ai')) { await sleep(3000); console.log('TABS', i, JSON.stringify(b.targets().filter((t) => ['page','other'].includes(t.type())).map((t) => t.type() + ' ' + t.url().replace(/[?#].*/, '').slice(0, 90))));
       for (const t of b.targets()) { if (t.type() === 'page' && !t.url().startsWith('chrome-extension://fjdh') && !/^(about|chrome):/.test(t.url())) { const p2 = await t.page().catch(() => null); if (p2) console.log('PAGE', i, p2.url().replace(/[?#].*/, '').slice(0, 90), JSON.stringify(mask(await p2.evaluate(() => document.body.innerText.slice(0, 600)).catch(() => '')))); } }
