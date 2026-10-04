@@ -12,7 +12,10 @@ const TASKS = JSON.parse(fs.readFileSync('tasks.json', 'utf8')).filter((t) => !p
 const MAXSEC = +(process.env.MAXSEC || 300);
 let shot = 0;
 async function pageOf(t) { try { return (await t.page()) || (await t.asPage()); } catch { return null; } }
-async function mainPage(b) { for (let i = 0; i < 40; i++) { const t = b.targets().find((t) => t.url().includes('/main.html')); if (t) { const pg = await pageOf(t); if (pg) return pg; } await sleep(1000); } throw new Error('no main.html'); }
+async function mainPage(b) { for (let i = 0; i < 40; i++) { const t = b.targets().find((t) => t.url().includes('/main.html')); if (t) { const pg = await pageOf(t); if (pg) return pg; } await sleep(1000); }
+  console.log('NOMAIN targets', JSON.stringify(b.targets().map((t) => t.type() + ' ' + t.url().replace(/[?].*/, '').slice(0, 90))));
+  const np = await b.newPage(); await np.goto('chrome-extension://fjdhphbdlfjogobdofoaagnlnkoibdge/main.html#/', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch((e) => console.log('NOMAIN goto', String(e).slice(0, 100)));
+  await sleep(4000); console.log('NOMAIN opened', np.url().replace(/[?].*/, '')); if (np.url().includes('/main.html')) return np; throw new Error('no main.html'); }
 async function dumpMain(b, tag) { const pg = await mainPage(b); if (!/^(ob|ws|codefail)/.test(tag)) await pg.screenshot({ path: `${tag}-${shot++}.png` }).catch(() => {});
   const txt = await pg.evaluate(() => document.body.innerText.slice(0, 3000)); const el = await pg.evaluate(() => [...document.querySelectorAll('button,a,input,textarea,[contenteditable="true"],[role=textbox]')].slice(0, 80).map((e) => (e.tagName + ':' + (e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.innerText || e.type || '')).replace(/\s+/g, ' ').slice(0, 60)));
   console.log('DUMP', tag, pg.url(), mask(JSON.stringify(txt))); console.log('ELEMS', tag, mask(JSON.stringify(el))); }
