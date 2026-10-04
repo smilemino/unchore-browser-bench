@@ -34,7 +34,11 @@ async function login(b) {
   await sleep(12000);
   { const pg2 = await mainPage(b); const st = await pg2.evaluate(() => document.body.innerText.slice(0, 300)); if (/verification code/i.test(st)) { await dumpMain(b, 'codefail'); throw new Error('code not accepted'); } }
   for (let i = 0; i < 14; i++) { pg = await mainPage(b); if (!pg.url().includes('/onboarding')) break;
-    const c = await clickText(pg, '^(connect|skip|next|continue|done|get started|start|maybe later|not now|finish|got it|allow|start using aside|let.s go)$'); console.log('ONBOARD', i, pg.url().split('#')[1], c); if (!c) { await dumpMain(b, 'ob'); break; } await sleep(5000); }
+    let pick = '';
+    if (pg.url().includes('/onboarding/ai')) { pick = await clickAny(pg, '^Aside$'); await sleep(1500); }
+    const c = await clickText(pg, '^(connect|skip|next|continue|done|get started|start|maybe later|not now|finish|got it|allow|start using aside|let.s go|start for free|continue with free|use free plan|free)$'); console.log('ONBOARD', i, pg.url().split('#')[1], pick, c); if (!c) { await dumpMain(b, 'ob'); break; }
+    if (i >= 3 && pg.url().includes('/onboarding/ai')) await dumpMain(b, 'ob-ai' + i);
+    await sleep(5000); }
   await dumpMain(b, 'ws');
 }
 async function askBox(pg) { return pg.evaluateHandle(() => { const c = [...document.querySelectorAll('textarea,[contenteditable="true"],[role=textbox],input[type=text]')].filter((e) => e.offsetParent !== null);
