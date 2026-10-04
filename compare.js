@@ -48,7 +48,15 @@ async function login(b) {
       const inp = await pg.$('input[type=password], input[placeholder*="key" i], input[name*="key" i]');
       if (inp && KEY) { await inp.click(); await inp.type(KEY, { delay: 5 }); console.log('KEYTYPED'); }
       await sleep(800); const sv = await clickText(pg, '^submit$'); console.log('KEYSAVE', sv); await sleep(6000); await dumpMain(b, 'ob-key2b');
-      for (let k = 0; k < 3; k++) { const gs = await clickText(pg, '^get started$'); console.log('FREEPLAN', k, gs); if (!gs) break; await sleep(5000); }
+      if (pg.url().includes('/onboarding/done')) {
+        await pg.evaluate(() => [...document.querySelectorAll('input[type=checkbox]')].slice(0, 2).forEach((c) => { if (c.checked) (c.closest('label') || c).click(); })).catch(() => {});
+        const gh = await pg.evaluateHandle(() => [...document.querySelectorAll('button')].find((x) => /get started/i.test(x.innerText))); const ge = gh.asElement();
+        if (ge) { const bx = await ge.boundingBox(); if (bx) await pg.mouse.click(bx.x + bx.width / 2, bx.y + bx.height / 2); } await sleep(4000); console.log('DONEPAGE mouse', pg.url().split('#')[1]);
+        if (pg.url().includes('/onboarding/done')) { await pg.keyboard.press('Enter'); await sleep(4000); console.log('DONEPAGE enter', pg.url().split('#')[1]); }
+        if (pg.url().includes('/onboarding/done')) { await pg.evaluate(() => { location.hash = '#/'; }); await sleep(5000); console.log('DONEPAGE hash', pg.url().split('#')[1]); }
+        const tabs = b.targets().filter((t) => t.type() === 'page').map((t) => t.url().replace(/[?].*/, '').slice(0, 80)); console.log('DONEPAGE tabs', JSON.stringify(tabs));
+        if (!pg.url().includes('/onboarding')) continue; break;
+      }
       await dumpMain(b, 'ob-key3'); if (!pg.url().includes('/onboarding/ai')) continue; if (i >= 5) break;
     }
     if (pg.url().includes('/onboarding/ai') && i >= 3) {
