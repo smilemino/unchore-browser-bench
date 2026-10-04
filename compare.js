@@ -14,7 +14,7 @@ let shot = 0;
 async function pageOf(t) { try { return (await t.page()) || (await t.asPage()); } catch { return null; } }
 async function mainPage(b) { for (let i = 0; i < 40; i++) { const t = b.targets().find((t) => t.url().includes('/main.html')); if (t) { const pg = await pageOf(t); if (pg) return pg; } await sleep(1000); }
   console.log('NOMAIN targets', JSON.stringify(b.targets().map((t) => t.type() + ' ' + t.url().replace(/[?].*/, '').slice(0, 90))));
-  for (const t of b.targets()) { if (t.type() === 'page' && t.url().startsWith('chrome://newtab')) { const p2 = await pageOf(t); if (p2) { await sleep(3000); const has = await p2.evaluate(() => !!document.querySelector('textarea,[contenteditable="true"],[role=textbox]')).catch(() => false); console.log('NOMAIN newtab textbox', has, JSON.stringify(mask(await p2.evaluate(() => document.body.innerText.slice(0, 300)).catch(() => '')))); if (has) return p2; } } }
+  for (const t of b.targets()) { if (t.type() === 'page' && t.url().startsWith('chrome://newtab')) { const p2 = await pageOf(t); if (p2) { await sleep(3000); const has = await p2.evaluate(() => !!document.querySelector('textarea,[contenteditable="true"],[role=textbox]')).catch(() => false); console.log('NOMAIN newtab textbox', has, JSON.stringify(mask(await p2.evaluate(() => document.body.innerText.slice(0, 300)).catch(() => '')))); if (has) { await p2.bringToFront().catch(() => {}); return p2; } } } }
   const np = await b.newPage(); await np.goto('chrome-extension://fjdhphbdlfjogobdofoaagnlnkoibdge/main.html#/', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch((e) => console.log('NOMAIN goto', String(e).slice(0, 100)));
   await sleep(4000); console.log('NOMAIN opened', np.url().replace(/[?].*/, '')); if (np.url().includes('/main.html')) return np; throw new Error('no main.html'); }
 async function dumpMain(b, tag) { const pg = await mainPage(b); if (!/^(ob|ws|codefail)/.test(tag)) await pg.screenshot({ path: `${tag}-${shot++}.png` }).catch(() => {});
@@ -87,13 +87,13 @@ async function askBox(pg) { return pg.evaluateHandle(() => { const c = [...docum
 async function runTask(b, t) {
   for (const x of b.targets()) if (x.type() === 'page' && !x.url().startsWith('chrome')) { const pg = await pageOf(x); await pg?.close().catch(() => {}); }
   const tab = await b.newPage(); await tab.goto(t.start, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}); await sleep(2000);
-  let pg = await mainPage(b); await clickText(pg, '^new chat$'); await sleep(2500); pg = await mainPage(b);
+  let pg = await mainPage(b); await pg.bringToFront().catch(() => {}); await clickText(pg, '^new chat$').catch((e) => console.log('NEWCHAT', String(e).slice(0, 80))); await sleep(2500); pg = await mainPage(b); await pg.bringToFront().catch(() => {});
   const box = await askBox(pg); if (!box || !(await box.asElement())) { await dumpMain(b, 'nobox-' + t.id); return { id: t.id, kind: t.kind, status: 'nobox', answer: '', url: '', sec: 0, steps: 0, asks: 0, cost: 0 }; }
   const before = await pg.evaluate(() => document.body.innerText.length);
   await box.asElement().click(); await pg.keyboard.type(`${t.goal}\n(지금 열린 탭: ${t.start})`.replace('\n', ' '), { delay: 5 }); await pg.keyboard.press('Enter');
   const t0 = Date.now(); let last = '', same = 0, txt = '';
   while ((Date.now() - t0) / 1000 < MAXSEC) { await sleep(5000); pg = await mainPage(b);
-    txt = await pg.evaluate(() => document.body.innerText); const busy = await pg.evaluate(() => [...document.querySelectorAll('button,[role=button]')].some((e) => /^(stop|cancel|중지)$/i.test((e.getAttribute('aria-label') || e.innerText || '').trim())) || /Working for/i.test(document.body.innerText.slice(0, 4000)));
+    await pg.bringToFront().catch(() => {}); txt = await pg.evaluate(() => document.body.innerText); const busy = await pg.evaluate(() => [...document.querySelectorAll('button,[role=button]')].some((e) => /^(stop|cancel|중지)$/i.test((e.getAttribute('aria-label') || e.innerText || '').trim())) || /Working for/i.test(document.body.innerText.slice(0, 4000)));
     if (txt === last && !busy) { if (++same >= 4) break; } else same = 0; last = txt; }
   const sec = Math.round((Date.now() - t0) / 1000);
   const k = txt.lastIndexOf(t.goal.slice(0, 12)); const answer = mask((k >= 0 ? txt.slice(k + t.goal.length) : txt.slice(before)).slice(0, 1500));
@@ -106,7 +106,7 @@ async function runTask(b, t) {
   return { id: t.id, kind: t.kind, status: ok ? 'done' : 'fail', ok, answer: answer.replace(/\s+/g, ' ').trim(), url, urls, sec, steps: 0, asks, cost: 0 };
 }
 (async () => {
-  const b = await p.connect({ browserURL: 'http://127.0.0.1:9222', defaultViewport: null });
+  const b = await p.connect({ browserURL: 'http://127.0.0.1:9222', defaultViewport: null, protocolTimeout: 45000 });
   await login(b); const R = [];
   for (const t of TASKS) { let r; try { r = await runTask(b, t); } catch (e) { r = { id: t.id, kind: t.kind, status: 'error', ok: false, answer: String(e).slice(0, 200), url: '', sec: 0, asks: 0, cost: 0 }; }
     R.push(r); console.log('RESULT', mask(JSON.stringify({ ...r, urls: undefined, answer: r.answer.slice(0, 300) }))); fs.writeFileSync('result-aside.json', JSON.stringify(R, null, 1)); }
