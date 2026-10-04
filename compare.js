@@ -35,7 +35,9 @@ async function login(b) {
   { const pg2 = await mainPage(b); const st = await pg2.evaluate(() => document.body.innerText.slice(0, 300)); if (/verification code/i.test(st)) { await dumpMain(b, 'codefail'); throw new Error('code not accepted'); } }
   for (let i = 0; i < 14; i++) { pg = await mainPage(b); if (!pg.url().includes('/onboarding')) break;
     let pick = '';
-    if (pg.url().includes('/onboarding/ai')) { pick = await clickAny(pg, '^Aside$'); await sleep(1500); }
+    if (pg.url().includes('/onboarding/ai')) { pick = await pg.evaluate(() => { const r = document.querySelector('input[type=radio]'); if (!r) return ''; (r.closest('label') || r.parentElement || r).click(); if (!r.checked) r.click(); return 'radio1 ' + r.checked; }).catch((e) => 'err ' + e);
+      if (!/true/.test(pick)) { const h = await pg.$('input[type=radio]'); if (h) { const box = await h.boundingBox(); if (box) await pg.mouse.click(box.x + box.width / 2, box.y + box.height / 2); else { const lb = await h.evaluateHandle((e) => e.closest('label') || e.parentElement); await lb.asElement()?.click().catch(() => {}); } pick += ' mouse ' + await h.evaluate((e) => e.checked); } }
+      await sleep(1500); }
     const c = await clickText(pg, '^(connect|skip|next|continue|done|get started|start|maybe later|not now|finish|got it|allow|start using aside|let.s go|start for free|continue with free|use free plan|free)$'); console.log('ONBOARD', i, pg.url().split('#')[1], pick, c); if (!c) { await dumpMain(b, 'ob'); break; }
     if (i >= 3 && pg.url().includes('/onboarding/ai')) await dumpMain(b, 'ob-ai' + i);
     await sleep(5000); }
