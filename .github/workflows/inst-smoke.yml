@@ -16,7 +16,8 @@ jobs:
           $t0 = Get-Date
           $p = Start-Process .\setup.exe -ArgumentList '--do-not-launch-chrome','--verbose-logging' -Wait -PassThru
           "SETUP_RC=$($p.ExitCode) SETUP_SEC=$([int]((Get-Date)-$t0).TotalSeconds)"
-          $exe = (Get-ChildItem -Recurse -ErrorAction SilentlyContinue $env:LOCALAPPDATA,"C:\Program Files","C:\Program Files (x86)" -Filter chrome.exe | Where-Object { $_.FullName -match 'Unchore' } | Select-Object -First 1).FullName
+          $exe = (Get-ChildItem -Recurse -ErrorAction SilentlyContinue $env:LOCALAPPDATA,"C:\Program Files","C:\Program Files (x86)" -Filter chrome.exe | Where-Object { $_.FullName -match '\\Application\\chrome.exe$' -and $_.FullName -notmatch 'Google' } | Select-Object -First 1).FullName
+          Get-ChildItem -Recurse -ErrorAction SilentlyContinue $env:LOCALAPPDATA -Filter chrome.exe | ForEach-Object { "FOUND_EXE " + $_.FullName }
           "INSTALLED_EXE=$exe"
           "EXE=$exe" | Out-File -Append $env:GITHUB_ENV
           $ext = Get-ChildItem -Recurse (Split-Path $exe) -Directory -Filter unchore-assistant | Select-Object -First 1
