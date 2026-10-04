@@ -26,7 +26,7 @@ async function login(b) {
   console.log('SIGNUP_SENT', new Date().toISOString());
   let code = ''; const end = Date.now() + 14 * 60e3, t0 = Date.now(); let resent = 0;
   while (Date.now() < end && !code) {
-    if (Date.now() - t0 > (resent + 1) * 240e3 && resent < 2) { const pr = await mainPage(b); console.log('RESEND', ++resent, await clickText(pr, '^resend code$')); } code = await getMsg('code', 20e3); }
+    if (Date.now() - t0 > (resent + 1) * 240e3 && resent < 2) { const pr = await mainPage(b); console.log('RESEND', ++resent, await clickText(pr, '^resend code')); } code = await getMsg('code', 20e3); }
   console.log('CODE_GOT', code ? 'yes' : 'none'); if (!code) throw new Error('no code');
   pg = await mainPage(b); const ins = await pg.$$('input[placeholder*="erification" i], input[aria-label*="code" i], input'); await ins[0].click({ clickCount: 3 }); await pg.keyboard.type(code, { delay: 40 }); await pg.keyboard.press('Enter'); await clickText(pg, '^continue$');
   await sleep(12000);
