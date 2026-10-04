@@ -1,0 +1,62 @@
+name: inst-smoke
+on: workflow_dispatch
+jobs:
+  inst:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Get and install
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}", INST_KEY: "${{ secrets.INST_KEY }}" }
+        run: |
+          gh release download win-inst-98 -R $env:GITHUB_REPOSITORY -p setup.enc
+          & "C:\Program Files\Git\usr\bin\openssl.exe" enc -d -aes-256-cbc -pbkdf2 -md sha256 -in setup.enc -out setup.exe -pass env:INST_KEY
+          "DECRYPT_RC=$LASTEXITCODE"
+          (Get-Item setup.exe).VersionInfo | Format-List ProductName,ProductVersion
+          $t0 = Get-Date
+          $p = Start-Process .\setup.exe -ArgumentList '--do-not-launch-chrome','--verbose-logging' -Wait -PassThru
+          "SETUP_RC=$($p.ExitCode) SETUP_SEC=$([int]((Get-Date)-$t0).TotalSeconds)"
+          $exe = (Get-ChildItem -Recurse -ErrorAction SilentlyContinue $env:LOCALAPPDATA,"C:\Program Files","C:\Program Files (x86)" -Filter chrome.exe | Where-Object { $_.FullName -match 'Unchore' } | Select-Object -First 1).FullName
+          "INSTALLED_EXE=$exe"
+          "EXE=$exe" | Out-File -Append $env:GITHUB_ENV
+          $ext = Get-ChildItem -Recurse (Split-Path $exe) -Directory -Filter unchore-assistant | Select-Object -First 1
+          "EXT_DIR=$($ext.FullName)"
+          if ($ext) { Get-ChildItem $ext.FullName | ForEach-Object { "EXT_FILE " + $_.Name } }
+          Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" | ForEach-Object { $d=(Get-ItemProperty $_.PSPath).DisplayName; if ($d) { "UNINSTALL_ENTRY $d" } }
+      - name: Launch like a user and check the assistant
+        shell: pwsh
+        run: |
+          Start-Process $env:EXE -ArgumentList '--remote-debugging-port=9222','--no-first-run','--user-data-dir=C:\prof','about:blank'
+          Start-Sleep 8
+          npm i puppeteer-core@24 --silent | Out-Null
+          @'
+          const p = require('puppeteer-core');
+          (async () => {
+            const b = await p.connect({ browserURL: 'http://127.0.0.1:9222' });
+            console.log('VERSION', await b.version());
+            const pg = await b.newPage();
+            await pg.goto('chrome://version', { waitUntil: 'domcontentloaded' });
+            const cmd = await pg.evaluate(() => (document.querySelector('#command_line') || {}).innerText || '');
+            console.log('HAS_LOAD_EXTENSION', /load-extension=.*unchore-assistant/i.test(cmd));
+            const out = {};
+            for (const u of ['https://unchore.ai','https://www.google.com','https://www.naver.com','https://rlink.kr']) {
+              const t0 = Date.now();
+              try { const r = await pg.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }); out[u] = { status: r && r.status(), ms: Date.now()-t0 };
+                if (u.includes('unchore')) await pg.screenshot({ path: 'shot-unchore.png' });
+              } catch (e) { out[u] = { err: String(e).slice(0,100) }; }
+            }
+            console.log('SITES', JSON.stringify(out));
+            await new Promise(r => setTimeout(r, 3000));
+            const ext = b.targets().filter(t => t.url().startsWith('chrome-extension://')).map(t => t.type()+' '+t.url());
+            console.log('EXT_TARGETS', JSON.stringify(ext));
+            let name = '';
+            const sw = b.targets().find(t => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://'));
+            if (sw) { const w = await sw.worker(); name = await w.evaluate(() => chrome.runtime.getManifest().name + ' ' + chrome.runtime.getManifest().version); }
+            console.log('EXT_NAME', name);
+            b.disconnect();
+          })().catch(e => { console.log('FAIL', e); process.exit(1); });
+          '@ | Out-File -Encoding utf8 t.js
+          node t.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: inst, path: "*.png" }
