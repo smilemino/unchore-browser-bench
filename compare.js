@@ -17,16 +17,18 @@ async function dumpMain(b, tag) { const pg = await mainPage(b); if (!/^(ob|ws|co
   const txt = await pg.evaluate(() => document.body.innerText.slice(0, 3000)); const el = await pg.evaluate(() => [...document.querySelectorAll('button,a,input,textarea,[contenteditable="true"],[role=textbox]')].slice(0, 80).map((e) => (e.tagName + ':' + (e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.innerText || e.type || '')).replace(/\s+/g, ' ').slice(0, 60)));
   console.log('DUMP', tag, pg.url(), mask(JSON.stringify(txt))); console.log('ELEMS', tag, mask(JSON.stringify(el))); }
 async function clickText(pg, re) { return pg.evaluate((src) => { const r = new RegExp(src, 'i'); const e = [...document.querySelectorAll('button,a,[role=button]')].find((x) => r.test((x.innerText || x.getAttribute('aria-label') || '').trim())); if (e) { e.click(); return (e.innerText || e.getAttribute('aria-label')).trim().slice(0, 30); } return ''; }, re); }
+// 단추가 아닌 글자(span·div)로 된 «다시 보내기»도 누른다 — 맞는 것 중 가장 작은(안쪽) 요소 (2026-10-04: button 만 찾아 3회 모두 못 누름)
+async function clickAny(pg, re) { return pg.evaluate((src) => { const r = new RegExp(src, 'i'); const c = [...document.querySelectorAll('body *')].filter((x) => r.test((x.innerText || '').trim()) && x.offsetParent !== null); c.sort((a, b) => (a.innerText || '').length - (b.innerText || '').length); const e = c[0]; if (e) { e.click(); return (e.tagName + ':' + e.innerText).trim().slice(0, 40); } return ''; }, re); }
 async function login(b) {
   console.log('PUBKEY', await putFile(`pub-${NONCE}.pem`, publicKey.export({ type: 'spki', format: 'pem' })));
   EMAIL = await getMsg('email', 5 * 60e3); if (!EMAIL) throw new Error('no email'); console.log('EMAIL_GOT');
   let pg = await mainPage(b); await pg.waitForSelector('input', { timeout: 30000 }); await pg.click('input'); await pg.keyboard.type(EMAIL, { delay: 25 });
   await clickText(pg, '^continue$');
   await pg.waitForFunction(() => /verification code/i.test(document.body.innerText), { timeout: 60000 }).catch(() => {});
-  console.log('SIGNUP_SENT', new Date().toISOString());
+  console.log('SIGNUP_SENT', new Date().toISOString()); await dumpMain(b, 'codefail-after-continue').catch(() => {});
   let code = ''; const end = Date.now() + 14 * 60e3, t0 = Date.now(); let resent = 0;
   while (Date.now() < end && !code) {
-    if (Date.now() - t0 > (resent + 1) * 240e3 && resent < 2) { const pr = await mainPage(b); console.log('RESEND', ++resent, await clickText(pr, '^resend code')); } code = await getMsg('code', 20e3); }
+    if (Date.now() - t0 > (resent + 1) * 240e3 && resent < 2) { const pr = await mainPage(b); console.log('RESEND', ++resent, (await clickText(pr, '^resend')) || (await clickAny(pr, '^resend'))); } code = await getMsg('code', 20e3); }
   console.log('CODE_GOT', code ? 'yes' : 'none'); if (!code) throw new Error('no code');
   pg = await mainPage(b); const ins = await pg.$$('input[placeholder*="erification" i], input[aria-label*="code" i], input'); await ins[0].click({ clickCount: 3 }); await pg.keyboard.type(code, { delay: 40 }); await pg.keyboard.press('Enter'); await clickText(pg, '^continue$');
   await sleep(12000);
