@@ -35,12 +35,24 @@ async function login(b) {
   { const pg2 = await mainPage(b); const st = await pg2.evaluate(() => document.body.innerText.slice(0, 300)); if (/verification code/i.test(st)) { await dumpMain(b, 'codefail'); throw new Error('code not accepted'); } }
   for (let i = 0; i < 14; i++) { pg = await mainPage(b); if (!pg.url().includes('/onboarding')) break;
     let pick = '';
-    if (pg.url().includes('/onboarding/ai')) { pick = await pg.evaluate(() => { const r = document.querySelectorAll('input[type=radio]')[2]; if (!r) return ''; (r.closest('label') || r.parentElement || r).click(); if (!r.checked) r.click(); return 'radio1 ' + r.checked; }).catch((e) => 'err ' + e);
+    if (pg.url().includes('/onboarding/ai')) { pick = await pg.evaluate(() => { const r = document.querySelector('input[type=radio]'); if (!r) return ''; (r.closest('label') || r.parentElement || r).click(); if (!r.checked) r.click(); return 'radio1 ' + r.checked; }).catch((e) => 'err ' + e);
       if (!/true/.test(pick)) { const h = await pg.$('input[type=radio]'); if (h) { const box = await h.boundingBox(); if (box) await pg.mouse.click(box.x + box.width / 2, box.y + box.height / 2); else { const lb = await h.evaluateHandle((e) => e.closest('label') || e.parentElement); await lb.asElement()?.click().catch(() => {}); } pick += ' mouse ' + await h.evaluate((e) => e.checked); } }
       await sleep(1500); }
+    if (pg.url().includes('/onboarding/ai') && true) {
+      const KEY = await getMsg('apikey', 120e3); console.log('APIKEY_GOT', !!KEY);
+      await clickText(pg, '^show more options$'); await sleep(2000); await clickText(pg, '^use your own api key$'); await sleep(3000);
+      await dumpMain(b, 'ob-key1');
+      const prov = await clickAny(pg, '^(google|gemini|google gemini|google ai studio)$'); console.log('KEYPROV', prov); await sleep(2000);
+      const sel = await pg.evaluate(() => { const s = [...document.querySelectorAll('select')].find((x) => [...x.options].some((o) => /gemini|google/i.test(o.text))); if (!s) return ''; const o = [...s.options].find((o) => /gemini|google/i.test(o.text)); s.value = o.value; s.dispatchEvent(new Event('change', { bubbles: true })); return o.text; }); console.log('KEYSEL', sel);
+      await dumpMain(b, 'ob-key2');
+      const inp = await pg.$('input[type=password], input[placeholder*="key" i], input[name*="key" i]');
+      if (inp && KEY) { await inp.click(); await inp.type(KEY, { delay: 5 }); console.log('KEYTYPED'); }
+      await sleep(800); const sv = await clickText(pg, '^(save|connect|add|add key|continue|verify|done)$'); console.log('KEYSAVE', sv); await sleep(6000);
+      await dumpMain(b, 'ob-key3'); if (!pg.url().includes('/onboarding/ai')) continue; if (i >= 5) break;
+    }
     if (pg.url().includes('/onboarding/ai') && i >= 3) {
       if (!pg.__hooked) { pg.__hooked = 1; pg.on('console', (m) => console.log('CONSOLE', m.type(), mask(m.text()).slice(0, 300))); pg.on('response', (r) => { if (r.status() >= 400) console.log('NETERR', r.status(), r.url().replace(/[?#].*/, '').slice(0, 120)); }); pg.on('requestfailed', (r) => console.log('NETFAIL', r.url().replace(/[?#].*/, '').slice(0, 120), r.failure()?.errorText)); }
-      const lab = await pg.evaluateHandle(() => { const r = document.querySelectorAll('input[type=radio]')[2]; return r && (r.closest('label') || r.parentElement); });  // 10/4 21시 시험: Claude 칸
+      const lab = await pg.evaluateHandle(() => { const r = document.querySelector('input[type=radio]'); return r && (r.closest('label') || r.parentElement); });
       const lb = lab.asElement(); if (lb) { const bx = await lb.boundingBox(); if (bx) await pg.mouse.click(bx.x + 20, bx.y + bx.height / 2); }
       await sleep(800);
       const cb = await pg.evaluateHandle(() => [...document.querySelectorAll('button')].find((x) => /^connect$/i.test(x.innerText.trim())));
