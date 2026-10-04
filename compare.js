@@ -39,7 +39,9 @@ async function login(b) {
       if (!/true/.test(pick)) { const h = await pg.$('input[type=radio]'); if (h) { const box = await h.boundingBox(); if (box) await pg.mouse.click(box.x + box.width / 2, box.y + box.height / 2); else { const lb = await h.evaluateHandle((e) => e.closest('label') || e.parentElement); await lb.asElement()?.click().catch(() => {}); } pick += ' mouse ' + await h.evaluate((e) => e.checked); } }
       await sleep(1500); }
     const c = await clickText(pg, '^(connect|skip|next|continue|done|get started|start|maybe later|not now|finish|got it|allow|start using aside|let.s go|start for free|continue with free|use free plan|free)$'); console.log('ONBOARD', i, pg.url().split('#')[1], pick, c); if (!c) { await dumpMain(b, 'ob'); break; }
-    if (i >= 3 && pg.url().includes('/onboarding/ai')) await dumpMain(b, 'ob-ai' + i);
+    if (i >= 3 && pg.url().includes('/onboarding/ai')) { await sleep(3000); console.log('TABS', i, JSON.stringify(b.targets().filter((t) => ['page','other'].includes(t.type())).map((t) => t.type() + ' ' + t.url().replace(/[?#].*/, '').slice(0, 90))));
+      for (const t of b.targets()) { if (t.type() === 'page' && !t.url().startsWith('chrome-extension://fjdh') && !/^(about|chrome):/.test(t.url())) { const p2 = await t.page().catch(() => null); if (p2) console.log('PAGE', i, p2.url().replace(/[?#].*/, '').slice(0, 90), JSON.stringify(mask(await p2.evaluate(() => document.body.innerText.slice(0, 600)).catch(() => '')))); } }
+      if (i >= 5) break; }
     await sleep(5000); }
   await dumpMain(b, 'ws');
 }
