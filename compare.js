@@ -47,6 +47,7 @@ async function login(b) {
       const ce = cb.asElement(); const dis = ce ? await ce.evaluate((e) => e.disabled + ' ' + e.getAttribute('aria-disabled')) : 'none';
       if (ce) { const bx = await ce.boundingBox(); if (bx) await pg.mouse.click(bx.x + bx.width / 2, bx.y + bx.height / 2); }
       console.log('ONBOARD-MOUSE', i, 'connect', dis); await sleep(6000);
+      if (i === 4) { await clickText(pg, '^show more options$'); await sleep(2500); await dumpMain(b, 'ob-more'); const rs = await pg.evaluate(() => [...document.querySelectorAll('input[type=radio]')].map((r) => (r.closest('label') || r.parentElement).innerText.replace(/\s+/g, ' ').slice(0, 80))); console.log('ONBOARD-OPTS', JSON.stringify(rs)); }
       if (!pg.url().includes('/onboarding/ai')) continue;
     }
     const c = await clickText(pg, '^(connect|skip|next|continue|done|get started|start|maybe later|not now|finish|got it|allow|start using aside|let.s go|start for free|continue with free|use free plan|free)$'); console.log('ONBOARD', i, pg.url().split('#')[1], pick, c); if (!c) { await dumpMain(b, 'ob'); break; }
