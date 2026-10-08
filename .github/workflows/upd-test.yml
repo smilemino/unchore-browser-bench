@@ -1,0 +1,66 @@
+name: upd-test
+on: workflow_dispatch
+jobs:
+  upd:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install r99
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}", INST_KEY: "${{ secrets.INST_KEY }}" }
+        run: |
+          gh release download win-upd-99 -R $env:GITHUB_REPOSITORY -p setup.enc
+          & "C:\Program Files\Git\usr\bin\openssl.exe" enc -d -aes-256-cbc -pbkdf2 -md sha256 -in setup.enc -out setup.exe -pass env:INST_KEY
+          "DECRYPT_RC=$LASTEXITCODE"
+          $p = Start-Process .\setup.exe -ArgumentList '--do-not-launch-chrome' -Wait -PassThru
+          "CHK_INSTALL_RC=$($p.ExitCode)"
+          $app = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          "CHK_APP_DIRS=" + ((Get-ChildItem $app -Directory | ForEach-Object Name) -join ',')
+      - name: Add-on installer (for .99 users) registers the task
+        shell: cmd
+        run: |
+          call upd\install-updater.cmd
+          echo CHK_ADDON_RC=%ERRORLEVEL%
+      - name: Check task and run update scenarios
+        shell: pwsh
+        run: |
+          $D = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Updater'
+          $App = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          "CHK_REGISTERED=" + (Get-Content (Join-Path $D 'registered.txt') -Raw).Trim()
+          $t = Get-ScheduledTask -TaskName 'Unchore Browser Update'
+          "CHK_TASK_STATE=$($t.State)"
+          $t.Triggers | ForEach-Object { "CHK_TASK_TRIGGER " + $_.CimClass.CimClassName + " start=" + $_.StartBoundary + " delay=" + $_.Delay + " random=" + $_.RandomDelay }
+          "CHK_TASK_ACTION " + $t.Actions[0].Execute + " " + $t.Actions[0].Arguments
+          # TEST ONLY: serve the update from this PC (the real script only accepts the company GitHub address)
+          New-Item -ItemType Directory -Force C:\srv | Out-Null
+          Copy-Item setup.exe C:\srv\setup.exe
+          $sha = (Get-FileHash C:\srv\setup.exe -Algorithm SHA256).Hash.ToLower()
+          Start-Process python -ArgumentList '-m','http.server','8080','--bind','127.0.0.1','--directory','C:\srv' -WindowStyle Hidden
+          Start-Sleep 3
+          $s = Get-Content (Join-Path $D 'unchore-update.ps1') -Raw
+          $s = $s.Replace("@('https://github.com/smilemino/'", "@('http://127.0.0.1:8080/', 'https://github.com/smilemino/'")
+          Set-Content -Encoding utf8BOM (Join-Path $D 'unchore-update.ps1') $s
+          Set-Content -Encoding ascii (Join-Path $D 'manifest-url.txt') 'http://127.0.0.1:8080/latest.json'
+          function M($v, $h, $u='http://127.0.0.1:8080/setup.exe') { Set-Content -Encoding ascii C:\srv\latest.json ("{`"version`":`"$v`",`"url`":`"$u`",`"sha256`":`"$h`"}") }
+          function RunTask { Start-ScheduledTask -TaskName 'Unchore Browser Update'; $t0=Get-Date; Start-Sleep 3; while ((Get-ScheduledTask -TaskName 'Unchore Browser Update').State -eq 'Running') { Start-Sleep 2 }; $i = Get-ScheduledTaskInfo -TaskName 'Unchore Browser Update'; "  task_result=$($i.LastTaskResult) sec=$([int]((Get-Date)-$t0).TotalSeconds)" }
+          "== A same version (no update expected)"; M '154.0.8037.98' $sha; RunTask
+          "== B newer version but wrong sha256 (must refuse)"; M '154.0.8037.100' ('0'*64); RunTask
+          "== C newer version from a non-company address (must refuse)"; M '154.0.8037.100' $sha 'https://example.com/setup.exe'; RunTask
+          "== D newer version (SIMULATED: same r99 file, version written as .100), browser closed"; M '154.0.8037.100' $sha; RunTask
+          "CHK_D_APP_DIRS=" + ((Get-ChildItem $App -Directory | ForEach-Object Name) -join ',') + " new_chrome=" + (Test-Path (Join-Path $App 'new_chrome.exe'))
+          "== E same, browser running"
+          $exe = Join-Path $App 'chrome.exe'
+          Start-Process $exe -ArgumentList '--no-first-run','--user-data-dir=C:\prof','https://example.com'
+          Start-Sleep 8
+          "  running=" + (@(Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$App\*" }).Count)
+          RunTask
+          "CHK_E_APP_DIRS=" + ((Get-ChildItem $App -Directory | ForEach-Object Name) -join ',') + " new_chrome=" + (Test-Path (Join-Path $App 'new_chrome.exe'))
+          Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
+          "== F browser start after update"
+          Start-Process $exe -ArgumentList '--no-first-run','--user-data-dir=C:\prof','https://example.com'; Start-Sleep 8
+          "CHK_F_APP_DIRS=" + ((Get-ChildItem $App -Directory | ForEach-Object Name) -join ',') + " new_chrome=" + (Test-Path (Join-Path $App 'new_chrome.exe')) + " running=" + (@(Get-Process chrome -ErrorAction SilentlyContinue).Count)
+          Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
+          "== update.log"
+          Get-Content (Join-Path $D 'update.log') | ForEach-Object { "CHK_LOG " + $_ }
+          Get-ChildItem $env:LOCALAPPDATA\Temp -Filter 'unchore-setup-*' -ErrorAction SilentlyContinue | ForEach-Object { "CHK_TEMP_LEFT " + $_.Name }
