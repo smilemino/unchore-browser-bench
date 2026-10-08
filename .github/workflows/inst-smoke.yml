@@ -59,8 +59,15 @@ jobs:
             const v = await pg.evaluate(() => document.body.innerText.slice(0, 600).replace(/\s+/g, ' '));
             console.log('CHK_VERSION_PAGE', v);
             await pg.screenshot({ path: 'version.png' });
-            let sw; for (let k = 0; k < 20 && !sw; k++) { sw = b.targets().find(t => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://')); if (!sw) await new Promise(r => setTimeout(r, 1000)); }
-            const w = await sw.worker();
+            let sw, w; const seen = [];
+            for (let k = 0; k < 30 && !sw; k++) {
+              for (const t of b.targets().filter(t => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://'))) {
+                try { const ww = await t.worker(); const n = await ww.evaluate(() => chrome.runtime.getManifest().name); seen.push(n); if (/unchore/i.test(n)) { sw = t; w = ww; break; } } catch (_) {}
+              }
+              if (!sw) await new Promise(r => setTimeout(r, 1000));
+            }
+            console.log('EXT_SEEN', JSON.stringify([...new Set(seen)]));
+            if (!sw) throw new Error('unchore extension worker not found');
             console.log('EXT_NAME', await w.evaluate(() => chrome.runtime.getManifest().name + ' ' + chrome.runtime.getManifest().version));
             await w.evaluate(() => chrome.storage.local.set({ brain: 'http://127.0.0.1:8787/step' }));
             const id = new URL(sw.url()).host;
