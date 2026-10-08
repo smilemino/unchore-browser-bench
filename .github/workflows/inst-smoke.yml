@@ -9,55 +9,77 @@ jobs:
         shell: pwsh
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}", INST_KEY: "${{ secrets.INST_KEY }}" }
         run: |
-          gh release download win-inst-98 -R $env:GITHUB_REPOSITORY -p setup.enc
+          gh release download win-inst-99 -R $env:GITHUB_REPOSITORY -p setup.enc
           & "C:\Program Files\Git\usr\bin\openssl.exe" enc -d -aes-256-cbc -pbkdf2 -md sha256 -in setup.enc -out setup.exe -pass env:INST_KEY
           "DECRYPT_RC=$LASTEXITCODE"
-          (Get-Item setup.exe).VersionInfo | Format-List ProductName,ProductVersion
+          $vi=(Get-Item setup.exe).VersionInfo; "CHK_SETUP_PRODUCT=$($vi.ProductName) | $($vi.FileDescription) | $($vi.ProductVersion)"
           $t0 = Get-Date
           $p = Start-Process .\setup.exe -ArgumentList '--do-not-launch-chrome','--verbose-logging' -Wait -PassThru
           "SETUP_RC=$($p.ExitCode) SETUP_SEC=$([int]((Get-Date)-$t0).TotalSeconds)"
+          Get-ChildItem -Recurse -ErrorAction SilentlyContinue $env:LOCALAPPDATA,"C:\Program Files","C:\Program Files (x86)" -Filter chrome.exe | Where-Object { $_.FullName -notmatch 'Google' } | ForEach-Object { "FOUND_EXE " + $_.FullName }
           $exe = (Get-ChildItem -Recurse -ErrorAction SilentlyContinue $env:LOCALAPPDATA,"C:\Program Files","C:\Program Files (x86)" -Filter chrome.exe | Where-Object { $_.FullName -match '\\Application\\chrome.exe$' -and $_.FullName -notmatch 'Google' } | Select-Object -First 1).FullName
-          Get-ChildItem -Recurse -ErrorAction SilentlyContinue $env:LOCALAPPDATA -Filter chrome.exe | ForEach-Object { "FOUND_EXE " + $_.FullName }
           "INSTALLED_EXE=$exe"
+          "CHK_INSTALL_DIR=$(Split-Path (Split-Path $exe))"
+          $ev=(Get-Item $exe).VersionInfo; "CHK_EXE_PRODUCT=$($ev.ProductName) | $($ev.FileDescription) | $($ev.CompanyName) | $($ev.ProductVersion)"
           "EXE=$exe" | Out-File -Append $env:GITHUB_ENV
           $ext = Get-ChildItem -Recurse (Split-Path $exe) -Directory -Filter unchore-assistant | Select-Object -First 1
           "EXT_DIR=$($ext.FullName)"
-          if ($ext) { Get-ChildItem $ext.FullName | ForEach-Object { "EXT_FILE " + $_.Name } }
-          Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" | ForEach-Object { $d=(Get-ItemProperty $_.PSPath).DisplayName; if ($d) { "UNINSTALL_ENTRY $d" } }
-      - name: Launch like a user and check the assistant
+          if ($ext) { "CHK_PARALLEL_CODE=" + [bool](Select-String -Path (Join-Path $ext.FullName agent.js) -Pattern 'runMany' -Quiet) }
+          Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall","HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue | ForEach-Object { $d=(Get-ItemProperty $_.PSPath).DisplayName; if ($d -and $d -notmatch 'Microsoft|Visual|Windows|SDK|Python|Git|Node|Google|Mozilla|Azure|PowerShell') { "CHK_UNINSTALL_ENTRY $d" } }
+          Get-ChildItem -Recurse -ErrorAction SilentlyContinue "$env:APPDATA\Microsoft\Windows\Start Menu\Programs","$env:ProgramData\Microsoft\Windows\Start Menu\Programs","$env:USERPROFILE\Desktop","C:\Users\Public\Desktop" -Filter *.lnk | Where-Object { $_.Name -match 'Unchore|Chromium' } | ForEach-Object { "CHK_SHORTCUT " + $_.FullName }
+      - name: Launch, check name and run 6 tasks at once
         shell: pwsh
         run: |
-          Start-Process $env:EXE -ArgumentList '--remote-debugging-port=9222','--no-first-run','--user-data-dir=C:\prof','about:blank'
-          Start-Sleep 8
+          @'
+          const http = require('http'); let now = 0, max = 0, total = 0;
+          http.createServer((q, s) => {
+            if (q.url === '/stats') { s.end(JSON.stringify({ max, total })); return; }
+            let b = ''; q.on('data', c => b += c); q.on('end', () => {
+              now++; total++; max = Math.max(max, now);
+              let j = {}; try { j = JSON.parse(b); } catch (_) {}
+              const pg = j.page || {};
+              setTimeout(() => { now--; s.setHeader('content-type', 'application/json');
+                s.end(JSON.stringify({ thought: 'practice', action: { type: 'done', answer: (pg.title || '(no title)') + ' | items ' + ((pg.items || []).length) } })); }, 4000);
+            });
+          }).listen(8787, '127.0.0.1');
+          '@ | Out-File -Encoding utf8 brain.js
+          Start-Process node -ArgumentList 'brain.js' -WindowStyle Hidden
+          Start-Process $env:EXE -ArgumentList '--remote-debugging-port=9222','--no-first-run','--user-data-dir=C:\prof','https://example.com'
+          Start-Sleep 10
+          Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { "CHK_WINDOW_TITLE " + $_.MainWindowTitle }
+          try { Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $r=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm=New-Object System.Drawing.Bitmap $r.Width,$r.Height; [System.Drawing.Graphics]::FromImage($bm).CopyFromScreen($r.Location,[System.Drawing.Point]::Empty,$r.Size); $bm.Save("$PWD\desktop.png"); "CHK_DESKTOP_SHOT ok" } catch { "CHK_DESKTOP_SHOT fail $_" }
           npm i puppeteer-core@24 --silent | Out-Null
           @'
           const p = require('puppeteer-core');
           (async () => {
-            const b = await p.connect({ browserURL: 'http://127.0.0.1:9222' });
+            const b = await p.connect({ browserURL: 'http://127.0.0.1:9222', defaultViewport: null });
             console.log('VERSION', await b.version());
             const pg = await b.newPage();
             await pg.goto('chrome://version', { waitUntil: 'domcontentloaded' });
-            const cmd = await pg.evaluate(() => (document.querySelector('#command_line') || {}).innerText || '');
-            console.log('HAS_LOAD_EXTENSION', /load-extension=.*unchore-assistant/i.test(cmd));
-            const out = {};
-            for (const u of ['https://unchore.ai','https://www.google.com','https://www.naver.com','https://rlink.kr']) {
-              const t0 = Date.now();
-              try { const r = await pg.goto(u, { waitUntil: 'domcontentloaded', timeout: 30000 }); out[u] = { status: r && r.status(), ms: Date.now()-t0 };
-                if (u.includes('unchore')) await pg.screenshot({ path: 'shot-unchore.png' });
-              } catch (e) { out[u] = { err: String(e).slice(0,100) }; }
-            }
-            console.log('SITES', JSON.stringify(out));
-            await new Promise(r => setTimeout(r, 3000));
-            const ext = b.targets().filter(t => t.url().startsWith('chrome-extension://')).map(t => t.type()+' '+t.url());
-            console.log('EXT_TARGETS', JSON.stringify(ext));
-            let name = '';
-            const sw = b.targets().find(t => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://'));
-            if (sw) { const w = await sw.worker(); name = await w.evaluate(() => chrome.runtime.getManifest().name + ' ' + chrome.runtime.getManifest().version); }
-            console.log('EXT_NAME', name);
+            const v = await pg.evaluate(() => document.body.innerText.slice(0, 600).replace(/\s+/g, ' '));
+            console.log('CHK_VERSION_PAGE', v);
+            await pg.screenshot({ path: 'version.png' });
+            let sw; for (let k = 0; k < 20 && !sw; k++) { sw = b.targets().find(t => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://')); if (!sw) await new Promise(r => setTimeout(r, 1000)); }
+            const w = await sw.worker();
+            console.log('EXT_NAME', await w.evaluate(() => chrome.runtime.getManifest().name + ' ' + chrome.runtime.getManifest().version));
+            await w.evaluate(() => chrome.storage.local.set({ brain: 'http://127.0.0.1:8787/step' }));
+            const id = new URL(sw.url()).host;
+            const panel = await b.newPage();
+            await panel.goto('chrome-extension://' + id + '/panel.html', { waitUntil: 'domcontentloaded' });
+            const goal = ['1. https://example.com 제목 알려줘', '2. https://www.wikipedia.org 제목 알려줘', '3. https://unchore.ai 제목 알려줘', '4. https://rlink.kr 제목 알려줘', '5. https://www.naver.com 제목 알려줘', '6. https://httpbin.org/html 제목 알려줘'].join('\n');
+            const t0 = Date.now();
+            const res = await panel.evaluate((g) => new Promise((ok) => chrome.runtime.sendMessage({ type: 'run', goal: g }, ok)), goal);
+            const sec = ((Date.now() - t0) / 1000).toFixed(1);
+            console.log('CHK_PARALLEL_RESULT', JSON.stringify({ status: res && res.status, conc: res && res.conc, sec, tasks: (res && res.tasks || []).map(t => ({ i: t.i, status: t.status, answer: t.answer, ms: t.ms })) }));
+            const st = await (await fetch('http://127.0.0.1:8787/stats')).text();
+            console.log('CHK_BRAIN_STATS', st, 'cores', await w.evaluate(() => navigator.hardwareConcurrency));
+            const tabs = await w.evaluate(() => chrome.tabs.query({}).then(ts => ts.map(t => t.title)));
+            console.log('CHK_TABS', JSON.stringify(tabs));
             b.disconnect();
           })().catch(e => { console.log('FAIL', e); process.exit(1); });
           '@ | Out-File -Encoding utf8 t.js
           node t.js
+          Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { "CHK_WINDOW_TITLE_AFTER " + $_.MainWindowTitle }
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: inst, path: "*.png" }
