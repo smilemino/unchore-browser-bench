@@ -64,17 +64,17 @@ jobs:
           @'
           import time, sys
           from pywinauto import Desktop
+          from pywinauto.keyboard import send_keys
           end = time.time() + 40
           while time.time() < end:
               for w in Desktop(backend="win32").windows(class_name="#32770"):
-                  t = w.window_text()
-                  print("BM_DIALOG_SEEN", repr(t), flush=True)
+                  if w.window_text() != "Open": continue
+                  print("BM_DIALOG_SEEN Open", flush=True)
                   try:
-                      w.set_focus()
-                      e = w.child_window(class_name="Edit", found_index=0)
-                      e.set_edit_text(r"C:\bookmarks_2026_10_09.html")
-                      time.sleep(0.5)
-                      w.child_window(title="&Open", class_name="Button").click()
+                      w.set_focus(); time.sleep(0.5)
+                      send_keys("%n"); time.sleep(0.3)
+                      send_keys(r"C:\bookmarks_2026_10_09.html", with_spaces=True); time.sleep(0.5)
+                      send_keys("{ENTER}")
                       print("BM_DIALOG_FILLED ok", flush=True); sys.exit(0)
                   except Exception as ex:
                       print("BM_DIALOG_ERR", ex, flush=True)
@@ -106,7 +106,7 @@ jobs:
             console.log('BM_CLICKED', clicked);
             await new Promise(r => helper.on('exit', r));
             await new Promise(r => setTimeout(r, 6000));
-            const msg = await pg.evaluate(`${deep}.filter(e=>e.children.length===0&&e.textContent.trim()).map(e=>e.textContent.trim()).filter(t=>/bookmark|success|ready|import/i.test(t)).slice(0,8)`);
+            const msg = await pg.evaluate(`${deep}.filter(e=>e.children.length===0&&e.tagName!=='STYLE'&&e.textContent.trim()).map(e=>e.textContent.trim()).filter(t=>/bookmark|success|ready|import/i.test(t)).slice(0,8)`);
             console.log('BM_RESULT_TEXT', JSON.stringify(msg));
             await pg.screenshot({ path: 'bm2-after.png' });
             const bp = await b.newPage();
