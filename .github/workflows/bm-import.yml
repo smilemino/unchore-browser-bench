@@ -1,0 +1,141 @@
+name: bm-import
+on: workflow_dispatch
+jobs:
+  bm:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Get and install
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}", INST_KEY: "${{ secrets.INST_KEY }}" }
+        run: |
+          gh release download win-inst-99 -R $env:GITHUB_REPOSITORY -p setup.enc
+          & "C:\Program Files\Git\usr\bin\openssl.exe" enc -d -aes-256-cbc -pbkdf2 -md sha256 -in setup.enc -out setup.exe -pass env:INST_KEY
+          "DECRYPT_RC=$LASTEXITCODE"
+          $p = Start-Process .\setup.exe -ArgumentList '--do-not-launch-chrome' -Wait -PassThru
+          "SETUP_RC=$($p.ExitCode)"
+          $exe = (Get-ChildItem -Recurse -ErrorAction SilentlyContinue $env:LOCALAPPDATA,"C:\Program Files","C:\Program Files (x86)" -Filter chrome.exe | Where-Object { $_.FullName -match '\\Application\\chrome.exe$' -and $_.FullName -notmatch 'Google' } | Select-Object -First 1).FullName
+          "INSTALLED_EXE=$exe"
+          "EXE=$exe" | Out-File -Append $env:GITHUB_ENV
+      - name: Make a Chrome-style bookmarks export file
+        shell: pwsh
+        run: |
+          $html = @'
+          <!DOCTYPE NETSCAPE-Bookmark-file-1>
+          <!-- This is an automatically generated file.
+               It will be read and overwritten.
+               DO NOT EDIT! -->
+          <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+          <TITLE>Bookmarks</TITLE>
+          <H1>Bookmarks</H1>
+          <DL><p>
+              <DT><H3 ADD_DATE="1727000000" LAST_MODIFIED="1727000000" PERSONAL_TOOLBAR_FOLDER="true">북마크바</H3>
+              <DL><p>
+                  <DT><A HREF="https://unchore.ai/" ADD_DATE="1727000001">언초어</A>
+                  <DT><A HREF="https://www.naver.com/" ADD_DATE="1727000002">네이버</A>
+                  <DT><H3 ADD_DATE="1727000003" LAST_MODIFIED="1727000003">회사</H3>
+                  <DL><p>
+                      <DT><A HREF="https://rlink.kr/" ADD_DATE="1727000004">리링몰</A>
+                      <DT><A HREF="https://kmong.com/" ADD_DATE="1727000005">크몽</A>
+                      <DT><A HREF="https://www.sabangnet.co.kr/" ADD_DATE="1727000006">사방넷</A>
+                      <DT><H3 ADD_DATE="1727000007" LAST_MODIFIED="1727000007">관리자 화면</H3>
+                      <DL><p>
+                          <DT><A HREF="https://github.com/" ADD_DATE="1727000008">깃허브</A>
+                          <DT><A HREF="https://console.aws.amazon.com/" ADD_DATE="1727000009">아마존 콘솔</A>
+                      </DL><p>
+                  </DL><p>
+              </DL><p>
+              <DT><H3 ADD_DATE="1727000010" LAST_MODIFIED="1727000010">기타 북마크</H3>
+              <DL><p>
+                  <DT><A HREF="https://www.youtube.com/" ADD_DATE="1727000011">유튜브</A>
+                  <DT><A HREF="https://mail.google.com/" ADD_DATE="1727000012">지메일</A>
+              </DL><p>
+          </DL><p>
+          '@
+          [IO.File]::WriteAllText("C:\bm\bookmarks_2026_10_09.html".Replace('\bm\','\'), ($html -replace '(?m)^          ',''), (New-Object System.Text.UTF8Encoding $false))
+          "BM_FILE_BYTES=$((Get-Item C:\bookmarks_2026_10_09.html).Length)"
+      - name: Import through the settings screen like a person
+        shell: pwsh
+        run: |
+          pip install pywinauto --quiet 2>&1 | Out-Null
+          Start-Process $env:EXE -ArgumentList '--remote-debugging-port=9222','--no-first-run','--user-data-dir=C:\prof','about:blank'
+          Start-Sleep 8
+          npm i puppeteer-core@24 --silent | Out-Null
+          @'
+          import time, sys
+          from pywinauto import Desktop
+          end = time.time() + 40
+          while time.time() < end:
+              for w in Desktop(backend="win32").windows(class_name="#32770"):
+                  t = w.window_text()
+                  print("BM_DIALOG_SEEN", repr(t), flush=True)
+                  try:
+                      w.set_focus()
+                      e = w.child_window(class_name="Edit", found_index=0)
+                      e.set_edit_text(r"C:\bookmarks_2026_10_09.html")
+                      time.sleep(0.5)
+                      w.child_window(title="&Open", class_name="Button").click()
+                      print("BM_DIALOG_FILLED ok", flush=True); sys.exit(0)
+                  except Exception as ex:
+                      print("BM_DIALOG_ERR", ex, flush=True)
+              time.sleep(1)
+          print("BM_DIALOG_FILLED none", flush=True)
+          '@ | Out-File -Encoding utf8 dlg.py
+          @'
+          const p = require('puppeteer-core');
+          const { spawn } = require('child_process');
+          const fs = require('fs');
+          const deep = `(function all(r){const o=[];const w=x=>{o.push(x);if(x.shadowRoot)[...x.shadowRoot.querySelectorAll('*')].forEach(w);};[...r.querySelectorAll('*')].forEach(w);return o;})(document)`;
+          (async () => {
+            const b = await p.connect({ browserURL: 'http://127.0.0.1:9222', defaultViewport: null });
+            const pg = (await b.pages())[0];
+            await pg.goto('chrome://settings/importData', { waitUntil: 'domcontentloaded' });
+            await new Promise(r => setTimeout(r, 4000));
+            const opts = await pg.evaluate(`(()=>{const s=${deep}.find(e=>e.tagName==='SELECT'&&e.id==='browserSelect');return s?[...s.options].map((o,i)=>i+':'+o.textContent.trim()):null})()`);
+            console.log('BM_SOURCE_OPTIONS', JSON.stringify(opts));
+            const picked = await pg.evaluate(`(()=>{const s=${deep}.find(e=>e.tagName==='SELECT'&&e.id==='browserSelect');if(!s)return 'no select';const i=[...s.options].findIndex(o=>/html/i.test(o.textContent));if(i<0)return 'no html option';s.selectedIndex=i;s.dispatchEvent(new Event('change',{bubbles:true}));return s.options[i].textContent.trim()})()`);
+            console.log('BM_PICKED', picked);
+            await new Promise(r => setTimeout(r, 1000));
+            await pg.screenshot({ path: 'bm1-dialog.png' });
+            const btns = await pg.evaluate(`${deep}.filter(e=>(e.tagName==='CR-BUTTON'||e.tagName==='BUTTON')&&e.offsetParent!==null).map(e=>e.id+'|'+e.textContent.trim())`);
+            console.log('BM_BUTTONS', JSON.stringify(btns));
+            const helper = spawn('python', ['dlg.py']);
+            helper.stdout.on('data', d => process.stdout.write(d.toString()));
+            helper.stderr.on('data', d => process.stdout.write('PYERR ' + d.toString()));
+            const clicked = await pg.evaluate(`(()=>{const c=${deep}.find(e=>(e.tagName==='CR-BUTTON'||e.tagName==='BUTTON')&&e.offsetParent!==null&&/choose file|import/i.test(e.textContent)&&!/cancel/i.test(e.textContent));if(!c)return 'none';c.click();return c.id+'|'+c.textContent.trim()})()`);
+            console.log('BM_CLICKED', clicked);
+            await new Promise(r => helper.on('exit', r));
+            await new Promise(r => setTimeout(r, 6000));
+            const msg = await pg.evaluate(`${deep}.filter(e=>e.offsetParent!==null&&e.children.length===0&&e.textContent.trim()).map(e=>e.textContent.trim()).filter(t=>/bookmark|success|ready|import/i.test(t)).slice(0,8)`);
+            console.log('BM_RESULT_TEXT', JSON.stringify(msg));
+            await pg.screenshot({ path: 'bm2-after.png' });
+            const bp = await b.newPage();
+            await bp.goto('chrome://bookmarks', { waitUntil: 'domcontentloaded' });
+            await new Promise(r => setTimeout(r, 3000));
+            await bp.screenshot({ path: 'bm3-bookmarks-page.png' });
+            await new Promise(r => setTimeout(r, 4000));
+            b.disconnect();
+          })().catch(e => { console.log('FAIL', e); process.exit(1); });
+          '@ | Out-File -Encoding utf8 imp.js
+          node imp.js
+          Start-Sleep 5
+          Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 3
+          $f = 'C:\prof\Default\Bookmarks'
+          if (Test-Path $f) {
+            @'
+          import json
+          j = json.load(open(r"C:\prof\Default\Bookmarks", encoding="utf-8"))
+          urls = []
+          def walk(n, path):
+              if n.get("type") == "url": urls.append((path, n["name"], n["url"]))
+              for c in n.get("children", []): walk(c, path + "/" + n.get("name", ""))
+          for k, v in j["roots"].items(): walk(v, k)
+          print("BM_COUNT", len(urls), "of 9")
+          for u in urls: print("BM_ITEM", u[0], "|", u[1], "|", u[2])
+          '@ | Out-File -Encoding utf8 chk.py
+            $env:PYTHONIOENCODING='utf-8'; python chk.py
+          } else { "BM_COUNT 0 (no Bookmarks file)" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: bm, path: "*.png" }
