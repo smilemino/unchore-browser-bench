@@ -88,7 +88,7 @@ jobs:
           const deep = `(function all(r){const o=[];const w=x=>{o.push(x);if(x.shadowRoot)[...x.shadowRoot.querySelectorAll('*')].forEach(w);};[...r.querySelectorAll('*')].forEach(w);return o;})(document)`;
           (async () => {
             const b = await p.connect({ browserURL: 'http://127.0.0.1:9222', defaultViewport: null });
-            const pg = (await b.pages())[0];
+            const pg = await b.newPage();
             await pg.goto('chrome://settings/importData', { waitUntil: 'domcontentloaded' });
             await new Promise(r => setTimeout(r, 4000));
             const opts = await pg.evaluate(`(()=>{const s=${deep}.find(e=>e.tagName==='SELECT'&&e.id==='browserSelect');return s?[...s.options].map((o,i)=>i+':'+o.textContent.trim()):null})()`);
