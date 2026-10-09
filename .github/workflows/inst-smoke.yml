@@ -3,20 +3,26 @@ on: workflow_dispatch
 jobs:
   inst:
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Get and install
         shell: pwsh
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}", INST_KEY: "${{ secrets.INST_KEY }}" }
         run: |
-          gh release download win-inst-99 -R $env:GITHUB_REPOSITORY -p setup.enc
-          & "C:\Program Files\Git\usr\bin\openssl.exe" enc -d -aes-256-cbc -pbkdf2 -md sha256 -in setup.enc -out setup.exe -pass env:INST_KEY
-          "DECRYPT_RC=$LASTEXITCODE"
+          gh release download win-inst-100 -R $env:GITHUB_REPOSITORY -p 'setup*.enc'
+          foreach ($v in '99','100') { & "C:\Program Files\Git\usr\bin\openssl.exe" enc -d -aes-256-cbc -pbkdf2 -md sha256 -in "setup$v.enc" -out "setup$v.exe" -pass env:INST_KEY; "DECRYPT_RC_$v=$LASTEXITCODE" }
+          $p0 = Start-Process .\setup99.exe -ArgumentList '--do-not-launch-chrome' -Wait -PassThru
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          "CHK_R99_RC=$($p0.ExitCode) DIRS=" + ((Get-ChildItem $A -Directory | ForEach-Object Name) -join ',')
+          Copy-Item setup100.exe setup.exe
           $vi=(Get-Item setup.exe).VersionInfo; "CHK_SETUP_PRODUCT=$($vi.ProductName) | $($vi.FileDescription) | $($vi.ProductVersion)"
           $t0 = Get-Date
           $p = Start-Process .\setup.exe -ArgumentList '--do-not-launch-chrome','--verbose-logging' -Wait -PassThru
           "SETUP_RC=$($p.ExitCode) SETUP_SEC=$([int]((Get-Date)-$t0).TotalSeconds)"
           Get-ChildItem -Recurse -ErrorAction SilentlyContinue $env:LOCALAPPDATA,"C:\Program Files","C:\Program Files (x86)" -Filter chrome.exe | Where-Object { $_.FullName -notmatch 'Google' } | ForEach-Object { "FOUND_EXE " + $_.FullName }
+          "CHK_AFTER_UPGRADE_DIRS=" + ((Get-ChildItem $A -Directory | ForEach-Object Name) -join ',')
+          "CHK_UPDATER_IN_APP=" + ((Get-ChildItem -Recurse $A -Filter register.ps1 | ForEach-Object FullName) -join ',')
+          "CHK_TASK_BEFORE_LAUNCH=" + [bool](Get-ScheduledTask -TaskName 'Unchore Browser Update' -ErrorAction SilentlyContinue)
           $exe = (Get-ChildItem -Recurse -ErrorAction SilentlyContinue $env:LOCALAPPDATA,"C:\Program Files","C:\Program Files (x86)" -Filter chrome.exe | Where-Object { $_.FullName -match '\\Application\\chrome.exe$' -and $_.FullName -notmatch 'Google' } | Select-Object -First 1).FullName
           "INSTALLED_EXE=$exe"
           "CHK_INSTALL_DIR=$(Split-Path (Split-Path $exe))"
@@ -44,8 +50,11 @@ jobs:
           }).listen(8787, '127.0.0.1');
           '@ | Out-File -Encoding utf8 brain.js
           Start-Process node -ArgumentList 'brain.js' -WindowStyle Hidden
-          Start-Process $env:EXE -ArgumentList '--remote-debugging-port=9222','--no-first-run','--user-data-dir=C:\prof','https://example.com'
-          Start-Sleep 10
+          Start-Process $env:EXE -ArgumentList '--remote-debugging-port=9222','--no-first-run','--lang=ko','--user-data-dir=C:\prof','https://example.com'
+          Start-Sleep 25
+          $t = Get-ScheduledTask -TaskName 'Unchore Browser Update' -ErrorAction SilentlyContinue
+          "CHK_TASK_AFTER_LAUNCH=" + [bool]$t + " state=" + $t.State
+          $rf = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Updater\registered.txt'; if (Test-Path $rf) { "CHK_REGISTERED=" + (Get-Content $rf -Raw).Trim() }
           Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { "CHK_WINDOW_TITLE " + $_.MainWindowTitle }
           try { Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $r=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm=New-Object System.Drawing.Bitmap $r.Width,$r.Height; [System.Drawing.Graphics]::FromImage($bm).CopyFromScreen($r.Location,[System.Drawing.Point]::Empty,$r.Size); $bm.Save("$PWD\desktop.png"); "CHK_DESKTOP_SHOT ok" } catch { "CHK_DESKTOP_SHOT fail $_" }
           npm i puppeteer-core@24 --silent | Out-Null
@@ -59,6 +68,7 @@ jobs:
             const v = await pg.evaluate(() => document.body.innerText.slice(0, 600).replace(/\s+/g, ' '));
             console.log('CHK_VERSION_PAGE', v);
             await pg.screenshot({ path: 'version.png' });
+            for (const u of ['chrome://settings/help', 'chrome://settings/people', 'chrome://newtab']) { try { await pg.goto(u, { waitUntil: 'domcontentloaded' }); await new Promise(r => setTimeout(r, 2500)); const tx = await pg.evaluate(() => { const g = (n) => { let s = ''; const w = (x) => { if (x.shadowRoot) w(x.shadowRoot); for (const c of x.childNodes || []) { if (c.nodeType === 3) s += c.textContent + ' '; else w(c); } }; w(n); return s; }; return g(document.documentElement).replace(/\s+/g, ' '); }); console.log('CHK_PAGE', u, 'Chromium=' + (tx.match(/Chromium/g) || []).length, 'Unchore=' + (tx.match(/Unchore Browser/g) || []).length, 'Google API=' + /Google API/.test(tx), 'login=' + /로그인/.test(tx), '::', tx.slice(0, 300)); await pg.screenshot({ path: u.replace(/\W+/g, '_') + '.png' }); } catch (e) { console.log('CHK_PAGE_ERR', u, String(e).slice(0, 120)); } }
             let sw, w; const seen = [];
             for (let k = 0; k < 30 && !sw; k++) {
               for (const t of b.targets().filter(t => t.type() === 'service_worker' && t.url().startsWith('chrome-extension://'))) {
