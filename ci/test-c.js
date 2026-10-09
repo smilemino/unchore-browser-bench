@@ -9,6 +9,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(...a);
 const ps = (f, ...a) => { try { return execFileSync('pwsh', ['-NoProfile', '-File', 'C:\\w\\' + f, ...a], { encoding: 'utf8', timeout: 90000 }).trim(); } catch (e) { return 'PSERR ' + String(e.message).slice(0, 200); } };
 const shot = (n) => { log('CHK_SHOT', n, ps('shot.ps1', n).replace(/\s+/g, ' ')); log('CHK_UIA', n, ps('uia.ps1', n).replace(/\s+/g, ' ').slice(0, 1500)); };
+const bubble = (n) => { try { const t = fs.readFileSync(OUT + '\\uia_' + n + '.txt', 'utf8').split(/\r?\n/).filter((l) => /변경|되돌리|유지|사용 중지|사용 설정|개발자 모드|검색 설정|Google/.test(l) && !/MenuItem|맞춤설정|Google 서비스|Google 앱|Google에 물어|Google 검색의/.test(l)); log('CHK_BUBBLE', n, JSON.stringify(t)); } catch (e) { log('CHK_BUBBLE', n, 'ERR'); } };
+const keep = (n) => { log('CHK_KEEP', n, ps('click.ps1', '유지').replace(/\s+/g, ' ')); };
 function idForPath(path) { const h = crypto.createHash('sha256').update(Buffer.from(path, 'utf16le')).digest().slice(0, 16).toString('hex'); return [...h].map((c) => String.fromCharCode(97 + parseInt(c, 16))).join(''); }
 const BASE = ['--no-first-run', '--lang=ko'];
 
@@ -43,15 +45,21 @@ function prefs(ud, label, id) {
 }
 async function measure(b, label, ud, id, withDebugger) {
   await sleep(6000);
-  shot(label + '_start');
+  shot(label + '_start'); bubble(label + '_start');
+  // 확인 창이 있으면 «유지»를 눌러 둔다(지난번엔 Enter가 «이전 설정으로 되돌리기»를 눌러 확장이 꺼졌음)
+  keep(label + '_start'); await sleep(1500); shot(label + '_after_keep'); bubble(label + '_after_keep');
   // ① 주소창
   try { const pages0 = await b.pages(); await pages0[0].bringToFront(); } catch (_) {}
   log('CHK_KEYS', label, ps('keys.ps1', 'weather seoul').replace(/\s+/g, ' '));
   await sleep(7000);
   const urls = []; for (const t of b.targets()) if (t.type() === 'page') urls.push(t.url());
   log('CHK_OMNIBOX', label, JSON.stringify(urls));
-  shot(label + '_omnibox');
-  await sleep(2000); shot(label + '_omnibox2');
+  shot(label + '_omnibox'); bubble(label + '_omnibox');
+  await sleep(2000); shot(label + '_omnibox2'); bubble(label + '_omnibox2'); keep(label + '_omnibox');
+  // 두 번째 검색(확인 창이 두 번째 검색에서 뜨는지)
+  log('CHK_KEYS2', label, ps('keys.ps1', 'seoul news').replace(/\s+/g, ' ')); await sleep(7000);
+  { const u2 = []; for (const t of b.targets()) if (t.type() === 'page') u2.push(t.url()); log('CHK_OMNIBOX2', label, JSON.stringify(u2)); }
+  shot(label + '_omnibox_second'); bubble(label + '_omnibox_second'); keep(label + '_omnibox_second');
   // 설정 › 검색엔진
   try {
     const sp = await b.newPage(); await sp.goto('chrome://settings/search', { waitUntil: 'domcontentloaded' }); await sleep(3500);
