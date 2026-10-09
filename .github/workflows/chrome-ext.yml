@@ -32,7 +32,7 @@ jobs:
           npm init -y | Out-Null
           npm i puppeteer-core@24 --silent | Out-Null
           node -e "console.log('PUPPETEER', require('puppeteer-core/package.json').version)"
-          node test.js
+          node test-c.js
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: res, path: "C:/out/*" }
