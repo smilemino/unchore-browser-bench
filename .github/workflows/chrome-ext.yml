@@ -1,0 +1,38 @@
+name: chrome-ext
+on:
+  push:
+    branches: [soul-ucb-chromeext]
+jobs:
+  t:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get extension (encrypted) and Chrome info
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}", EXT_KEY: "${{ secrets.EXT_KEY }}" }
+        run: |
+          New-Item -ItemType Directory C:\ext,C:\out,C:\w -Force | Out-Null
+          gh release download chrome-ext-test -R $env:GITHUB_REPOSITORY -p 'ext.enc'
+          & "C:\Program Files\Git\usr\bin\openssl.exe" enc -d -aes-256-cbc -pbkdf2 -md sha256 -in ext.enc -out ext.zip -pass env:EXT_KEY; "DECRYPT_RC=$LASTEXITCODE"
+          Expand-Archive ext.zip C:\ext -Force
+          Remove-Item ext.zip,ext.enc
+          "CHK_EXT_FILES=" + ((Get-ChildItem C:\ext\unchore-assistant | ForEach-Object Name) -join ',')
+          Copy-Item ci\* C:\w\
+          $exe='C:\Program Files\Google\Chrome\Application\chrome.exe'; $v=(Get-Item $exe).VersionInfo; "CHK_CHROME=$($v.ProductName) $($v.ProductVersion)"
+          "CHK_DOMAIN=" + (Get-CimInstance Win32_ComputerSystem).PartOfDomain
+          "CHK_OS=" + (Get-CimInstance Win32_OperatingSystem).Caption
+          if (Test-Path 'HKLM:\SOFTWARE\Policies\Google\Chrome') { "CHK_POLICY_HKLM=" + ((Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Google\Chrome' | Out-String) -replace '\s+',' ') } else { "CHK_POLICY_HKLM=none" }
+          if (Test-Path 'HKCU:\SOFTWARE\Policies\Google\Chrome') { "CHK_POLICY_HKCU=" + ((Get-ItemProperty 'HKCU:\SOFTWARE\Policies\Google\Chrome' | Out-String) -replace '\s+',' ') } else { "CHK_POLICY_HKCU=none" }
+          Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
+      - name: Test
+        shell: pwsh
+        working-directory: C:\w
+        run: |
+          npm init -y | Out-Null
+          npm i puppeteer-core@24 --silent | Out-Null
+          node -e "console.log('PUPPETEER', require('puppeteer-core/package.json').version)"
+          node test.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: res, path: "C:/out/*" }
