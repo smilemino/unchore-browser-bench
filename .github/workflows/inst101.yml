@@ -81,6 +81,17 @@ jobs:
           Start-Sleep 20
           Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { "CHK_TITLE start " + $_.MainWindowTitle }
           Wins 'start'; Shot '02_start'; Uia 'start' $pat
+          for ($k = 1; $k -le 5; $k++) {
+            $clicked = $false
+            foreach ($t in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+              if ($t.Current.ClassName -ne 'Chrome_WidgetWin_1') { continue }
+              $bs = $t.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))
+              foreach ($b in $bs) { $nm = $b.Current.Name; if ($nm -match '^(Unchore Browser 시작|시작하기|건너뛰기|아니요|나중에|계속|확인|Skip|No thanks|Get started|Continue)') { try { $b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); "CHK_INTRO_CLICK $k [$nm]"; $clicked = $true; break } catch { "CHK_INTRO_CLICK_FAIL $k [$nm] $_" } } }
+              if ($clicked) { break }
+            }
+            if (-not $clicked) { "CHK_INTRO_NONE $k"; break }
+            Start-Sleep 5; Shot ("02_intro_after_$k"); Uia ("intro$k") $pat
+          }
           Focus; [System.Windows.Forms.SendKeys]::SendWait('^t'); Start-Sleep 6
           Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { "CHK_TITLE newtab " + $_.MainWindowTitle }
           Wins 'newtab'; Shot '03_first_newtab'; Uia 'newtab' $pat
