@@ -1,0 +1,189 @@
+name: keepwin
+on: workflow_dispatch
+jobs:
+  keepwin:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Helpers
+        shell: pwsh
+        run: |
+          @'
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
+          Add-Type @"
+          using System; using System.Text; using System.Runtime.InteropServices; using System.Collections.Generic;
+          public class W {
+            public delegate bool EP(IntPtr h, IntPtr l);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(EP f, IntPtr l);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+            [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+            [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+            public struct RECT { public int L, T, R, B; }
+            public static List<string> List() { var o = new List<string>(); EnumWindows((h, l) => { if (IsWindowVisible(h)) { var s = new StringBuilder(512); GetWindowText(h, s, 512); var c = new StringBuilder(256); GetClassName(h, c, 256); uint p; GetWindowThreadProcessId(h, out p); RECT r; GetWindowRect(h, out r); o.Add(p + "|" + h + "|" + c + "|" + s + "|" + r.L + "," + r.T + "," + (r.R - r.L) + "x" + (r.B - r.T)); } return true; }, IntPtr.Zero); return o; }
+          }
+          "@
+          function Shot($n) { try { $r=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm=New-Object System.Drawing.Bitmap $r.Width,$r.Height; [System.Drawing.Graphics]::FromImage($bm).CopyFromScreen($r.Location,[System.Drawing.Point]::Empty,$r.Size); $bm.Save("$env:GITHUB_WORKSPACE\shots\$n.png"); "CHK_SHOT $n ok" } catch { "CHK_SHOT $n fail $_" } }
+          function ChromeIds { @(Get-Process chrome -ErrorAction SilentlyContinue | ForEach-Object Id) }
+          function Wins($tag) { $ids = ChromeIds; foreach ($l in [W]::List()) { $p = [int]($l.Split('|')[0]); if ($ids -contains $p) { "CHK_WIN $tag $l" } } }
+          function MainH { $p = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero } }
+          function Focus { $h = MainH; if ($h -ne [IntPtr]::Zero) { [W]::ShowWindow($h, 3) | Out-Null; [W]::SetForegroundWindow($h) | Out-Null }; Start-Sleep -Milliseconds 600 }
+          function Uia($tag, $pat) {
+            $ids = ChromeIds; $root = [System.Windows.Automation.AutomationElement]::RootElement
+            $tops = $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+            $names = New-Object System.Collections.Generic.List[string]
+            foreach ($t in $tops) { if ($ids -contains $t.Current.ProcessId) {
+              $names.Add("TOP:" + $t.Current.Name + " [" + $t.Current.ClassName + "]")
+              try { $all = $t.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition); $i=0; foreach ($e in $all) { $i++; if ($i -gt 4000) { break }; $nm = $e.Current.Name; $v=''; try { $vp = $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern); $v = $vp.Current.Value } catch {}; if ($nm -or $v) { $names.Add($e.Current.ControlType.ProgrammaticName.Replace('ControlType.','') + ":" + $nm + $(if ($v) { " =" + $v } else { "" })) } } } catch { $names.Add("ERR " + $_) } } }
+            $names | Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE\shots\uia_$tag.txt"
+            "CHK_UIA $tag count=" + $names.Count
+            foreach ($n in $names) { if ($n -match $pat) { "CHK_UIA_HIT $tag :: " + $n.Substring(0, [Math]::Min(200, $n.Length)) } }
+          }
+          function Omni($text) { Focus; [System.Windows.Forms.SendKeys]::SendWait('^l'); Start-Sleep -Milliseconds 500; Set-Clipboard -Value $text; [System.Windows.Forms.SendKeys]::SendWait('^v'); Start-Sleep -Milliseconds 1500 }
+          '@ | Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE\h.ps1"
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\shots" | Out-Null
+          "CHK_SCREEN " + (Get-CimInstance Win32_VideoController | Select-Object -First 1 | ForEach-Object { "$($_.CurrentHorizontalResolution)x$($_.CurrentVerticalResolution)" })
+      - name: More helpers
+        shell: pwsh
+        run: |
+          @'
+          $KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA50nmGRO110CQq+QBAGCn0+Tb//qAEsUahEPK6UAOWrnY34tAQ9C4AvW447HxsJNq24aRHCSyJpuqO9BWQ/0bMk6ifz1rbBfKyUnJBbABENoFi/DF3Aik3NJORAVYonUsHbCO+eMojAQAnwWtOyBf/FIay+/IdFSPzLmcMM7ZSjL/UEfkxtL5TUI3cCjGlQ5PsdqsyVQigDWaFEhq/8LbQZlpMMGmbToDJJC0wYCno5E6fu9CsnLC51f2YAOeOL/E2qxBZHOWal75PRVVdWuxisjfaWLNNzXkITc0vPWBzpq9uAYojK82cwyOQGUicHo8p5wWDqFxCvyv2i3yv6ZGNQIDAQAB'
+          $XID = 'opifjjladhiahefopcfmlebppocldhjh'
+          function DlgCheck($tag) {
+            $ids = ChromeIds; $hits = @()
+            foreach ($t in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+              if ($ids -notcontains $t.Current.ProcessId) { continue }
+              try { foreach ($e in $t.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) { $nm = $e.Current.Name; if ($nm -match '하셨나요\?|변경했습니다|Did you mean to change') { $hits += $nm } } } catch {}
+            }
+            $u = @($hits | Select-Object -Unique)
+            "CHK_DIALOG $tag present=" + ($u.Count -gt 0) + " :: " + ($u -join ' | ')
+          }
+          function ClickBtn($re) {
+            foreach ($t in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+              if ($t.Current.ClassName -ne 'Chrome_WidgetWin_1') { continue }
+              $bs = $t.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))
+              foreach ($b in $bs) { $nm = $b.Current.Name; if ($nm -match $re) { try { $b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); return "CLICKED [$nm]" } catch { return "CLICK_FAIL [$nm] $_" } } }
+            }
+            return "NO_BUTTON"
+          }
+          function Launch($tag) {
+            Start-Process $env:EXE -ArgumentList '--lang=ko'; Start-Sleep 18
+            for ($k = 1; $k -le 4; $k++) { $r = ClickBtn '^(Unchore Browser 시작|시작하기|건너뛰기|아니요|나중에|Skip|No thanks|Get started)'; "CHK_INTRO $tag $k $r"; if ($r -eq 'NO_BUTTON') { break }; Start-Sleep 5 }
+          }
+          function CloseAll { Get-Process chrome -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }; Start-Sleep 6; Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3 }
+          function ReadAck($tag) {
+            $ud = Join-Path $env:LOCALAPPDATA 'Unchore Browser\User Data'
+            foreach ($f in 'Preferences','Secure Preferences') { $pf = Join-Path $ud "Default\$f"; if (Test-Path $pf) { $j = Get-Content $pf -Raw | ConvertFrom-Json -AsHashtable
+              if ($j.extensions -and $j.extensions.settings) { foreach ($k in $j.extensions.settings.Keys) { $e = $j.extensions.settings[$k]; if (("$($e.path)" -match 'unchore-assistant') -or $e.ack_ntp_bubble -or $e.ack_settings_bubble) { "CHK_ACK $tag [$f] id=$k location=$($e.location) ack_ntp_bubble=$($e.ack_ntp_bubble) ack_settings_bubble=$($e.ack_settings_bubble) path=$($e.path)" } } } } }
+          }
+          function PolDump($tag) {
+            $out = New-Object System.Collections.Generic.List[string]
+            foreach ($root in 'HKLM:\SOFTWARE\Policies','HKCU:\SOFTWARE\Policies','HKLM:\SOFTWARE\WOW6432Node\Policies') {
+              if (-not (Test-Path $root)) { continue }
+              foreach ($k in @(Get-Item $root) + @(Get-ChildItem $root -Recurse -ErrorAction SilentlyContinue)) {
+                $out.Add("KEY " + $k.Name)
+                if ($k.Name -match 'Google|Chromium|Unchore|Chrome') { foreach ($v in $k.GetValueNames()) { $out.Add("VAL " + $k.Name + " :: " + $v + " = " + $k.GetValue($v)) } }
+              }
+            }
+            $out | Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE\shots\pol_$tag.txt"
+            "CHK_POL $tag keys=" + ($out | Where-Object { $_ -like 'KEY *' }).Count + " browser_lines=" + ($out | Where-Object { $_ -match 'Google|Chromium|Unchore' }).Count
+            foreach ($l in $out) { if ($l -match 'Google|Chromium|Unchore') { "CHK_POL_LINE $tag $l" } }
+          }
+          '@ | Out-File -Encoding utf8 -Append "$env:GITHUB_WORKSPACE\h.ps1"
+      - name: Policy before install
+        shell: pwsh
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          PolDump 'before'
+      - name: Download from public release and silent install
+        shell: pwsh
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          $u = 'https://github.com/smilemino/unchore-browser-releases/releases/download/154.0.8037.98-r101/unchore-browser-154.0.8037.98-r101-win-x64-setup.exe'
+          Invoke-WebRequest -Uri $u -OutFile setup.exe -UseBasicParsing
+          "CHK_DL sha256=" + (Get-FileHash setup.exe -Algorithm SHA256).Hash
+          $p = Start-Process .\setup.exe -ArgumentList '--do-not-launch-chrome' -PassThru; $p.WaitForExit(); "CHK_SETUP_RC=$($p.ExitCode)"
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          "EXE=" + (Join-Path $A 'chrome.exe') | Out-File -Append $env:GITHUB_ENV
+          $ed = Get-ChildItem -Recurse $A -Directory -Filter unchore-assistant | Select-Object -First 1
+          "EXTDIR=" + $ed.FullName | Out-File -Append $env:GITHUB_ENV
+          "CHK_EXT_DIR=" + $ed.FullName
+          PolDump 'after_install'
+      - name: A1 first launch, first new tab, keep, then search
+        shell: pwsh
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          Launch 'A1'
+          Focus; [System.Windows.Forms.SendKeys]::SendWait('^t'); Start-Sleep 7
+          Shot 'A1_01_first_newtab'; DlgCheck 'A1_first_newtab'
+          "CHK_CLICK_KEEP " + (ClickBtn '^유지$'); Start-Sleep 3
+          Shot 'A1_02_after_keep'; DlgCheck 'A1_after_keep'
+          Focus; [System.Windows.Forms.SendKeys]::SendWait('^t'); Start-Sleep 4
+          Omni '날씨'; [System.Windows.Forms.SendKeys]::SendWait('{ENTER}'); Start-Sleep 9
+          Shot 'A1_03_after_search'; DlgCheck 'A1_after_search'
+          CloseAll; ReadAck 'A1'
+      - name: A2 second launch, same extension id
+        shell: pwsh
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          Launch 'A2'
+          Focus; [System.Windows.Forms.SendKeys]::SendWait('^t'); Start-Sleep 7
+          Shot 'A2_01_newtab'; DlgCheck 'A2_newtab'
+          Omni 'chrome://extensions'; [System.Windows.Forms.SendKeys]::SendWait('{ENTER}'); Start-Sleep 5
+          Shot 'A2_02_extensions'; Uia 'A2_extensions' '관리자|부모님|managed|parent|Unchore'
+          Omni 'chrome://policy'; [System.Windows.Forms.SendKeys]::SendWait('{ENTER}'); Start-Sleep 5
+          Shot 'A2_03_policy'; Uia 'A2_policy' '설정된 정책|No policies|관리|명령줄'
+          Omni 'chrome://management'; [System.Windows.Forms.SendKeys]::SendWait('{ENTER}'); Start-Sleep 5
+          Shot 'A2_04_management'; Uia 'A2_management' '관리'
+          CloseAll; ReadAck 'A2'
+      - name: B fixed key in manifest (new extension id, like after an update)
+        shell: pwsh
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          $mf = Join-Path $env:EXTDIR 'manifest.json'
+          $m = Get-Content $mf -Raw | ConvertFrom-Json -AsHashtable; $m['key'] = $KEY
+          $m | ConvertTo-Json -Depth 30 | Set-Content -Encoding utf8NoBOM $mf
+          "CHK_KEY_ADDED=" + ((Get-Content $mf -Raw) -match '"key"')
+          Launch 'B1'
+          Focus; [System.Windows.Forms.SendKeys]::SendWait('^t'); Start-Sleep 7
+          Shot 'B1_01_newtab_newid'; DlgCheck 'B1_newtab_newid'
+          Uia 'B1_newtab' 'chrome-extension://'
+          "CHK_CLICK_KEEP_B " + (ClickBtn '^유지$'); Start-Sleep 2
+          CloseAll; ReadAck 'B1'
+          Launch 'B2'
+          Focus; [System.Windows.Forms.SendKeys]::SendWait('^t'); Start-Sleep 7
+          Shot 'B2_01_newtab'; DlgCheck 'B2_newtab'
+          CloseAll
+      - name: C readable pages - is the managed text visible
+        shell: pwsh
+        run: |
+          npm i puppeteer-core@24 --silent | Out-Null
+          Start-Process $env:EXE -ArgumentList '--remote-debugging-port=9223','--user-data-dir=C:\prof3','--lang=ko','about:blank'
+          Start-Sleep 15
+          @'
+          const p = require('puppeteer-core');
+          (async () => {
+            const b = await p.connect({ browserURL: 'http://127.0.0.1:9223', defaultViewport: null });
+            const pg = await b.newPage();
+            for (const u of ['chrome://extensions', 'chrome://policy', 'chrome://management']) {
+              await pg.goto(u, { waitUntil: 'domcontentloaded' }); await new Promise(r => setTimeout(r, 3500));
+              const r = await pg.evaluate(() => {
+                const out = []; const re = /관리자가 관리하는|부모님이|managed by|관리 대상|관리되는|설정된 정책/;
+                const walk = (root) => { for (const el of root.querySelectorAll('*')) { if (el.shadowRoot) walk(el.shadowRoot);
+                  let own = ''; for (const c of el.childNodes) if (c.nodeType === 3) own += c.textContent; own = own.trim();
+                  if (own && re.test(own)) { const rc = el.getBoundingClientRect(); out.push({ text: own.slice(0, 80), tag: el.tagName, id: el.id, visible: el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }), w: Math.round(rc.width), h: Math.round(rc.height) }); } } };
+                walk(document); return out; });
+              console.log('CHK_VIS', u, JSON.stringify(r));
+              await pg.screenshot({ path: 'shots/C_' + u.replace(/\W+/g, '_') + '.png' });
+            }
+            b.disconnect();
+          })().catch(e => { console.log('FAIL', e); process.exit(1); });
+          '@ | Out-File -Encoding utf8 t.js
+          node t.js
+          Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: shotskeep, path: "shots/*" }
