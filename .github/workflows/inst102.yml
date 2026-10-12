@@ -1,0 +1,237 @@
+name: inst102
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  inst:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Helpers
+        shell: pwsh
+        run: |
+          @'
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing,UIAutomationClient,UIAutomationTypes
+          Add-Type @"
+          using System; using System.Text; using System.Runtime.InteropServices; using System.Collections.Generic;
+          public class W {
+            public delegate bool EP(IntPtr h, IntPtr l);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(EP f, IntPtr l);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+            [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+            [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+            public struct RECT { public int L, T, R, B; }
+            public static List<string> List() { var o = new List<string>(); EnumWindows((h, l) => { if (IsWindowVisible(h)) { var s = new StringBuilder(512); GetWindowText(h, s, 512); var c = new StringBuilder(256); GetClassName(h, c, 256); uint p; GetWindowThreadProcessId(h, out p); RECT r; GetWindowRect(h, out r); o.Add(p + "|" + h + "|" + c + "|" + s + "|" + r.L + "," + r.T + "," + (r.R - r.L) + "x" + (r.B - r.T)); } return true; }, IntPtr.Zero); return o; }
+          }
+          "@
+          function Shot($n) { try { $r=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm=New-Object System.Drawing.Bitmap $r.Width,$r.Height; [System.Drawing.Graphics]::FromImage($bm).CopyFromScreen($r.Location,[System.Drawing.Point]::Empty,$r.Size); $bm.Save("$env:GITHUB_WORKSPACE\shots\$n.png"); "CHK_SHOT $n ok" } catch { "CHK_SHOT $n fail $_" } }
+          function ChromeIds { @(Get-Process chrome -ErrorAction SilentlyContinue | ForEach-Object Id) }
+          function Wins($tag) { $ids = ChromeIds; foreach ($l in [W]::List()) { $p = [int]($l.Split('|')[0]); if ($ids -contains $p) { "CHK_WIN $tag $l" } } }
+          function MainH { $p = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero } }
+          function Focus { $h = MainH; if ($h -ne [IntPtr]::Zero) { [W]::ShowWindow($h, 3) | Out-Null; [W]::SetForegroundWindow($h) | Out-Null }; Start-Sleep -Milliseconds 600 }
+          function Uia($tag, $pat) {
+            $ids = ChromeIds; $root = [System.Windows.Automation.AutomationElement]::RootElement
+            $tops = $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+            $names = New-Object System.Collections.Generic.List[string]
+            foreach ($t in $tops) { if ($ids -contains $t.Current.ProcessId) {
+              $names.Add("TOP:" + $t.Current.Name + " [" + $t.Current.ClassName + "]")
+              try { $all = $t.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition); $i=0; foreach ($e in $all) { $i++; if ($i -gt 4000) { break }; $nm = $e.Current.Name; $v=''; try { $vp = $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern); $v = $vp.Current.Value } catch {}; if ($nm -or $v) { $names.Add($e.Current.ControlType.ProgrammaticName.Replace('ControlType.','') + ":" + $nm + $(if ($v) { " =" + $v } else { "" })) } } } catch { $names.Add("ERR " + $_) } } }
+            $names | Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE\shots\uia_$tag.txt"
+            "CHK_UIA $tag count=" + $names.Count
+            foreach ($n in $names) { if ($n -match $pat) { "CHK_UIA_HIT $tag :: " + $n.Substring(0, [Math]::Min(200, $n.Length)) } }
+          }
+          function Omni($text) { Focus; [System.Windows.Forms.SendKeys]::SendWait('^l'); Start-Sleep -Milliseconds 500; Set-Clipboard -Value $text; [System.Windows.Forms.SendKeys]::SendWait('^v'); Start-Sleep -Milliseconds 1500 }
+          function Dlg($tag) {
+            $ids = ChromeIds; $hit = @()
+            foreach ($t in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+              if ($ids -notcontains $t.Current.ProcessId) { continue }
+              try { foreach ($e in $t.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) { $nm = $e.Current.Name; if ($nm -match '변경하려고 하셨나요|변경사항 되돌리기|Did you mean to change|Change back') { $hit += $nm } } } catch {}
+            }
+            if ($hit.Count) { "CHK_DIALOG $tag SHOWN :: " + (($hit | Select-Object -Unique) -join ' / ') } else { "CHK_DIALOG $tag none" }
+          }
+          function Intro($pfx) {
+            for ($k = 1; $k -le 5; $k++) {
+              $clicked = $false
+              foreach ($t in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+                if ($t.Current.ClassName -ne 'Chrome_WidgetWin_1') { continue }
+                $bs = $t.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))
+                foreach ($b in $bs) { $nm = $b.Current.Name; if ($nm -match '^(Unchore Browser 시작|시작하기|건너뛰기|아니요|나중에|계속|확인|Skip|No thanks|Get started|Continue)') { try { $b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); "CHK_INTRO_CLICK $pfx $k [$nm]"; $clicked = $true; break } catch { "CHK_INTRO_CLICK_FAIL $pfx $k [$nm] $_" } } }
+                if ($clicked) { break }
+              }
+              if (-not $clicked) { "CHK_INTRO_NONE $pfx $k"; break }
+              Start-Sleep 5
+            }
+          }
+          function Tabs($pfx, $n) {
+            for ($k = 1; $k -le $n; $k++) { Focus; [System.Windows.Forms.SendKeys]::SendWait('^t'); Start-Sleep 7; Dlg ("$pfx" + "_newtab$k"); Shot ("{0}_newtab{1}" -f $pfx, $k) }
+          }
+          '@ | Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE\h.ps1"
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\shots" | Out-Null
+          "CHK_SCREEN " + (Get-CimInstance Win32_VideoController | Select-Object -First 1 | ForEach-Object { "$($_.CurrentHorizontalResolution)x$($_.CurrentVerticalResolution)" })
+      - name: A. Install public .101 (like an existing customer)
+        shell: pwsh
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          $u = 'https://github.com/smilemino/unchore-browser-releases/releases/download/154.0.8037.98-r101/unchore-browser-154.0.8037.98-r101-win-x64-setup.exe'
+          $t0 = Get-Date; Invoke-WebRequest -Uri $u -OutFile setup.exe -UseBasicParsing
+          "CHK_DL size=" + (Get-Item setup.exe).Length + " sec=" + [int]((Get-Date)-$t0).TotalSeconds + " sha256=" + (Get-FileHash setup.exe -Algorithm SHA256).Hash
+          $lj = Invoke-RestMethod 'https://github.com/smilemino/unchore-browser-releases/releases/latest/download/latest.json'
+          "CHK_LATEST_JSON version=$($lj.version) sha=$($lj.sha256)"
+          $vi=(Get-Item setup.exe).VersionInfo; "CHK_SETUP_PRODUCT=$($vi.ProductName) | $($vi.FileDescription) | $($vi.ProductVersion)"
+          "CHK_POLICY_BEFORE " + ((Get-ChildItem 'HKLM:\SOFTWARE\Policies','HKCU:\SOFTWARE\Policies' -ErrorAction SilentlyContinue | ForEach-Object Name) -join ',')
+          $t0 = Get-Date
+          $p = Start-Process .\setup.exe -ArgumentList '--do-not-launch-chrome' -PassThru
+          Start-Sleep 4; Wins 'during_install'; Shot 'a0_101_during_install'
+          $p.WaitForExit()
+          "CHK_SETUP_RC=$($p.ExitCode) SETUP_SEC=$([int]((Get-Date)-$t0).TotalSeconds)"
+          "CHK_CHROME_RUNNING_AFTER_INSTALL=" + (ChromeIds).Count
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          "CHK_APP_DIRS=" + ((Get-ChildItem $A -Directory | ForEach-Object Name) -join ',')
+          $exe = Join-Path $A 'chrome.exe'; "CHK_EXE_EXISTS=" + (Test-Path $exe)
+          "EXE=$exe" | Out-File -Append $env:GITHUB_ENV
+          "CHK_INITIAL_PREFS=" + ((Get-ChildItem -Recurse $A -Filter initial_preferences | ForEach-Object FullName) -join ',')
+          "CHK_EXT_DIR=" + ((Get-ChildItem -Recurse $A -Directory -Filter unchore-assistant | ForEach-Object FullName) -join ',')
+          "CHK_POLICY_AFTER " + ((Get-ChildItem 'HKLM:\SOFTWARE\Policies','HKCU:\SOFTWARE\Policies' -Recurse -ErrorAction SilentlyContinue | ForEach-Object Name) -join ',')
+          Get-ChildItem -Recurse -ErrorAction SilentlyContinue "$env:APPDATA\Microsoft\Windows\Start Menu\Programs","$env:USERPROFILE\Desktop" -Filter *.lnk | Where-Object { $_.Name -match 'Unchore|Chromium' } | ForEach-Object { "CHK_SHORTCUT " + $_.FullName }
+          Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue | ForEach-Object { $d=(Get-ItemProperty $_.PSPath).DisplayName; if ($d -match 'Unchore|Chromium') { "CHK_UNINSTALL_ENTRY $d" } }
+      - name: A. Use .101 once (default profile, 2 new tabs)
+        shell: pwsh
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          Start-Process $env:EXE -ArgumentList '--lang=ko'; Start-Sleep 20
+          Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { "CHK_101_TITLE " + $_.MainWindowTitle }
+          Intro 'a101'; Tabs 'a101' 2
+          Get-Process chrome -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }; Start-Sleep 6; Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
+          $pf = Join-Path $env:LOCALAPPDATA 'Unchore Browser\User Data\Default\Preferences'
+          if (Test-Path $pf) { $j = Get-Content $pf -Raw | ConvertFrom-Json -AsHashtable; foreach ($k in $j.extensions.settings.Keys) { $e = $j.extensions.settings[$k]; if ($e.path -match 'unchore') { "CHK_101_EXT id=$k state=$($e.state) path=$($e.path)" } } }
+      - name: B. Over-install .102 (draft release, not public)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          gh release download inst-test-r102 -R $env:GITHUB_REPOSITORY -p '*r102-win-x64-setup.exe' -O setup102.exe
+          "CHK_102_DL size=" + (Get-Item setup102.exe).Length + " sha256=" + (Get-FileHash setup102.exe -Algorithm SHA256).Hash
+          $vi=(Get-Item setup102.exe).VersionInfo; "CHK_102_SETUP_PRODUCT=$($vi.ProductName) | $($vi.FileDescription) | $($vi.ProductVersion)"
+          $t0 = Get-Date
+          $p = Start-Process .\setup102.exe -ArgumentList '--do-not-launch-chrome' -PassThru
+          Start-Sleep 4; Shot 'b0_102_during_install'
+          $p.WaitForExit()
+          "CHK_102_SETUP_RC=$($p.ExitCode) SETUP_SEC=$([int]((Get-Date)-$t0).TotalSeconds)"
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          "CHK_102_APP_DIRS=" + ((Get-ChildItem $A -Directory | ForEach-Object Name) -join ',')
+          "CHK_102_EXT_DIR=" + ((Get-ChildItem -Recurse $A -Directory -Filter unchore-assistant | ForEach-Object FullName) -join ',')
+          Get-ChildItem -Recurse $A -Filter manifest.json | Where-Object { $_.FullName -match 'unchore-assistant' } | ForEach-Object { $m = Get-Content $_.FullName -Raw | ConvertFrom-Json; "CHK_102_MANIFEST ver=$($m.version) key=" + [bool]$m.key }
+      - name: C. Launch .102 with the .101 profile, 3 new tabs
+        shell: pwsh
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          $pat = '변경하려고|되돌릴|Google|관리|Change back|change this page|Keep|유지|managed|조직'
+          Start-Process $env:EXE -ArgumentList '--lang=ko'
+          Start-Sleep 20
+          Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { "CHK_TITLE start " + $_.MainWindowTitle }
+          Wins 'start'; Shot '02_start'; Uia 'start' $pat
+          for ($k = 1; $k -le 5; $k++) {
+            $clicked = $false
+            foreach ($t in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+              if ($t.Current.ClassName -ne 'Chrome_WidgetWin_1') { continue }
+              $bs = $t.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))
+              foreach ($b in $bs) { $nm = $b.Current.Name; if ($nm -match '^(Unchore Browser 시작|시작하기|건너뛰기|아니요|나중에|계속|확인|Skip|No thanks|Get started|Continue)') { try { $b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); "CHK_INTRO_CLICK $k [$nm]"; $clicked = $true; break } catch { "CHK_INTRO_CLICK_FAIL $k [$nm] $_" } } }
+              if ($clicked) { break }
+            }
+            if (-not $clicked) { "CHK_INTRO_NONE $k"; break }
+            Start-Sleep 5; Shot ("02_intro_after_$k"); Uia ("intro$k") $pat
+          }
+          Focus; [System.Windows.Forms.SendKeys]::SendWait('^t'); Start-Sleep 6
+          Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { "CHK_TITLE newtab " + $_.MainWindowTitle }
+          Wins 'newtab'; Dlg 'c_newtab1'; Shot '03_first_newtab'; Uia 'newtab' $pat
+          Start-Sleep 5; Dlg 'c_newtab1_later'; Shot '04_first_newtab_later'
+          Tabs 'c' 3
+      - name: Address bar tests (keyboard, like a person)
+        shell: pwsh
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          $pat = '변경하려고|되돌릴|Change back|Google로'
+          $i = 5
+          foreach ($q in @('날씨', '언초어.한국', '네이버 메일 스팸함 비워 줘')) {
+            Focus; [System.Windows.Forms.SendKeys]::SendWait('^t'); Start-Sleep 3
+            Omni $q; Shot ("{0:d2}_omni_typed_{1}" -f $i, $i); $i++
+            [System.Windows.Forms.SendKeys]::SendWait('{ENTER}'); Start-Sleep 9
+            Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { "CHK_OMNI_TITLE [$q] " + $_.MainWindowTitle }
+            Wins ("omni$i"); Shot ("{0:d2}_omni_after_{1}" -f $i, $i); Uia ("omni$i") ('주소창|Address and search bar|' + $pat); $i++
+          }
+          foreach ($u in @('chrome://management', 'chrome://settings', 'chrome://settings/search', 'chrome://extensions', 'chrome://policy')) {
+            Focus; [System.Windows.Forms.SendKeys]::SendWait('^t'); Start-Sleep 2; Omni $u; [System.Windows.Forms.SendKeys]::SendWait('{ENTER}'); Start-Sleep 5
+            $n = ($u -replace '\W+','_'); Shot ("{0:d2}_{1}" -f $i, $n); Uia $n '관리|managed|Manage|Unchore|정책|policy|검색 엔진|Google'; $i++
+          }
+          Get-Process chrome -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }; Start-Sleep 6; Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
+      - name: D. Brand-new customer profile, 3 new tabs
+        shell: pwsh
+        run: |
+          . "$env:GITHUB_WORKSPACE\h.ps1"
+          Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
+          Start-Process $env:EXE -ArgumentList '--lang=ko','--user-data-dir=C:\freshcust'; Start-Sleep 20
+          Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | ForEach-Object { "CHK_FRESH_TITLE " + $_.MainWindowTitle }
+          Shot 'd_start'; Intro 'd'; Tabs 'd' 3
+          Get-Process chrome -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }; Start-Sleep 6; Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
+          $pf = 'C:\freshcust\Default\Preferences'
+          if (Test-Path $pf) { $j = Get-Content $pf -Raw | ConvertFrom-Json -AsHashtable; foreach ($k in $j.extensions.settings.Keys) { $e = $j.extensions.settings[$k]; if ($e.path -match 'unchore') { "CHK_FRESH_EXT id=$k state=$($e.state) disable_reasons=$($e.disable_reasons -join ',') path=$($e.path)" } } }
+      - name: Read profile files after real use
+        shell: pwsh
+        run: |
+          $ud = Join-Path $env:LOCALAPPDATA 'Unchore Browser\User Data'
+          "CHK_USERDATA_EXISTS=" + (Test-Path $ud) + " FirstRun=" + (Test-Path (Join-Path $ud 'First Run'))
+          foreach ($f in 'Preferences','Secure Preferences') { $pf = Join-Path $ud "Default\$f"; if (Test-Path $pf) { $j = Get-Content $pf -Raw | ConvertFrom-Json -AsHashtable
+            if ($j.default_search_provider_data) { "CHK_PREF_DSP [$f] " + ($j.default_search_provider_data.template_url_data | ConvertTo-Json -Compress -Depth 4).Substring(0, [Math]::Min(300, ($j.default_search_provider_data.template_url_data | ConvertTo-Json -Compress -Depth 4).Length)) }
+            if ($j.extensions -and $j.extensions.settings) { foreach ($k in $j.extensions.settings.Keys) { $e = $j.extensions.settings[$k]; if (($e.path -match 'unchore') -or ($e.manifest.name -match 'Unchore')) { "CHK_PREF_EXT [$f] id=$k state=$($e.state) location=$($e.location) disable_reasons=$($e.disable_reasons -join ',') path=$($e.path)" } } }
+            if ($j.extensions -and $j.extensions.ntp_overridden_bubble_acknowledged) { "CHK_PREF_NTP_ACK [$f] " + ($j.extensions.ntp_overridden_bubble_acknowledged | ConvertTo-Json -Compress) }
+          } }
+          Select-String -Path (Join-Path $ud 'Default\Preferences') -Pattern 'settings_overridden|ntp_overridden|acknowledged' -AllMatches -ErrorAction SilentlyContinue | ForEach-Object { $_.Matches.Value } | Group-Object | ForEach-Object { "CHK_PREF_KEY " + $_.Name + " x" + $_.Count }
+      - name: Second check with readable pages (fresh profile, debug port)
+        shell: pwsh
+        run: |
+          npm i puppeteer-core@24 --silent | Out-Null
+          Start-Process $env:EXE -ArgumentList '--remote-debugging-port=9222','--user-data-dir=C:\prof2','--lang=ko','about:blank'
+          Start-Sleep 15
+          @'
+          const p = require('puppeteer-core');
+          const txt = async (pg) => pg.evaluate(() => { let s = ''; const w = (x) => { if (x.shadowRoot) w(x.shadowRoot); for (const c of x.childNodes || []) { if (c.nodeType === 3) s += c.textContent + ' '; else if (c.nodeType === 1 && !['STYLE','SCRIPT'].includes(c.tagName)) w(c); } }; w(document.documentElement); return s.replace(/\s+/g, ' '); });
+          (async () => {
+            const b = await p.connect({ browserURL: 'http://127.0.0.1:9222', defaultViewport: null });
+            console.log('VERSION', await b.version());
+            const pg = await b.newPage();
+            for (const u of ['chrome://management', 'chrome://policy', 'chrome://settings/search', 'chrome://extensions']) {
+              try { await pg.goto(u, { waitUntil: 'domcontentloaded' }); await new Promise(r => setTimeout(r, 3000)); const t = await txt(pg); console.log('CHK_P2', u, ':: managed=' + /관리하는|managed by|관리됨/i.test(t), ':: ' + t.slice(0, 700)); await pg.screenshot({ path: 'shots/p2_' + u.replace(/\W+/g, '_') + '.png' }); } catch (e) { console.log('CHK_P2_ERR', u, String(e).slice(0, 160)); }
+            }
+            const ts = await b.targets(); console.log('CHK_P2_TARGETS', JSON.stringify(ts.map(t => t.type() + ' ' + t.url()).filter(x => /extension/.test(x))));
+            for (const q of ['날씨', '언초어.한국', '네이버 메일 스팸함 비워 줘']) {
+              try { const pq = await b.newPage(); await pq.goto('https://unchore.ai/go#q=' + encodeURIComponent(q), { waitUntil: 'domcontentloaded' }).catch(e => console.log('goto', String(e).slice(0, 100))); await new Promise(r => setTimeout(r, 8000));
+                const all = (await b.pages()).map(x => x.url()); const t = await txt(pq).catch(() => '');
+                console.log('CHK_P2_GO', q, ':: url=' + pq.url(), ':: title=' + (await pq.title().catch(() => '')), ':: text=' + t.slice(0, 300), ':: tabs=' + JSON.stringify(all.slice(-3)));
+                await pq.screenshot({ path: 'shots/p2_go_' + encodeURIComponent(q).slice(0, 30).replace(/%/g, '') + '.png' }); } catch (e) { console.log('CHK_P2_GO_ERR', q, String(e).slice(0, 160)); }
+            }
+            b.disconnect();
+          })().catch(e => { console.log('FAIL', e); process.exit(1); });
+          '@ | Out-File -Encoding utf8 t.js
+          node t.js
+          Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
+      - name: Auto update check
+        shell: pwsh
+        run: |
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          $s = Get-ChildItem -Recurse $A -Filter unchore-update.ps1 | Select-Object -First 1
+          "CHK_UPD_SCRIPT=" + $s.FullName
+          $t = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -match 'Unchore' }; foreach ($x in $t) { "CHK_UPD_TASK " + $x.TaskName + " state=" + $x.State }
+          $rf = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Updater\registered.txt'; if (Test-Path $rf) { "CHK_REGISTERED=" + (Get-Content $rf -Raw).Trim() }
+          if ($s) {
+            & pwsh -NoProfile -ExecutionPolicy Bypass -File $s.FullName | ForEach-Object { "CHK_UPD_NORMAL " + $_ }; "CHK_UPD_NORMAL_RC=$LASTEXITCODE"
+            "CHK_APP_DIRS_AFTER_UPD=" + ((Get-ChildItem $A -Directory | ForEach-Object Name) -join ',')
+            $lg = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Updater\update.log'; if (Test-Path $lg) { Get-Content $lg | Select-Object -Last 6 | ForEach-Object { "CHK_UPD_LOG " + $_ } }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: shots102, path: "shots/*" }
