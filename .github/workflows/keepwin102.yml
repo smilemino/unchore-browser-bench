@@ -1,5 +1,7 @@
 name: keepwin102
 on: workflow_dispatch
+permissions:
+  contents: write
 jobs:
   keepwin102:
     runs-on: windows-2025
