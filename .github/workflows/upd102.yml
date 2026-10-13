@@ -1,0 +1,38 @@
+name: upd102
+on: workflow_dispatch
+jobs:
+  upd:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Install public .101
+        shell: pwsh
+        run: |
+          $u = 'https://github.com/smilemino/unchore-browser-releases/releases/download/154.0.8037.98-r101/unchore-browser-154.0.8037.98-r101-win-x64-setup.exe'
+          Invoke-WebRequest -Uri $u -OutFile setup.exe -UseBasicParsing
+          $p = Start-Process .\setup.exe -ArgumentList '--do-not-launch-chrome' -PassThru; $p.WaitForExit()
+          "CHK_SETUP_RC=$($p.ExitCode)"
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          "CHK_DIRS_BEFORE=" + ((Get-ChildItem $A -Directory | ForEach-Object Name) -join ',')
+          "CHK_VER_BEFORE=" + (Get-Item (Join-Path $A 'chrome.exe')).VersionInfo.ProductVersion
+      - name: Run updater
+        shell: pwsh
+        run: |
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          $s = Get-ChildItem -Recurse $A -Filter unchore-update.ps1 | Select-Object -First 1
+          "CHK_UPD_SCRIPT=" + $s.FullName
+          Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -match 'Unchore' } | ForEach-Object { "CHK_UPD_TASK " + $_.TaskName + " state=" + $_.State }
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File $s.FullName 2>&1 | ForEach-Object { "CHK_UPD_OUT " + $_ }
+          "CHK_UPD_RC=$LASTEXITCODE"
+          Start-Sleep 20
+          "CHK_DIRS_AFTER=" + ((Get-ChildItem $A -Directory | ForEach-Object Name) -join ',')
+          "CHK_VER_AFTER=" + (Get-Item (Join-Path $A 'chrome.exe')).VersionInfo.ProductVersion
+          $lg = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Updater\update.log'; if (Test-Path $lg) { Get-Content $lg | Select-Object -Last 10 | ForEach-Object { "CHK_UPD_LOG " + $_ } }
+      - name: Launch after update
+        shell: pwsh
+        run: |
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          Start-Process (Join-Path $A 'chrome.exe') -ArgumentList '--no-first-run','about:blank'
+          Start-Sleep 10
+          "CHK_RUNNING=" + (Get-Process chrome -ErrorAction SilentlyContinue).Count
+          Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
