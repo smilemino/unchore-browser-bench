@@ -1,0 +1,74 @@
+name: tc-package
+on: workflow_dispatch
+jobs:
+  package:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 120
+    steps:
+      - name: Install Windows SDK 10.0.28000 (Chromium 154 needs it) with debuggers
+        shell: pwsh
+        run: |
+          $ok = $false
+          try { winget install --id Microsoft.WindowsSDK.10.0.28000 --accept-package-agreements --accept-source-agreements --silent --disable-interactivity; $ok = $? } catch {}
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Include\10.0.28000.0")) {
+            $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+            Start-Process -Wait -FilePath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList "modify","--installPath","`"$vs`"","--add","Microsoft.VisualStudio.Component.Windows11SDK.28000","--quiet","--norestart","--nocache"
+          }
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include" | Select-Object Name
+          Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\dbghelp.dll"
+      - name: Debugging tools (package script needs them)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\dbghelp.dll")) {
+            Invoke-WebRequest https://go.microsoft.com/fwlink/?linkid=2346205 -OutFile sdk.exe
+            Start-Process -Wait sdk.exe -ArgumentList "/features","OptionId.WindowsDesktopDebuggers","/quiet","/norestart"
+          }
+          Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\dbghelp.dll"
+      - name: Keep one MSVC toolset (package script needs exactly one; keep the newest)
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          foreach ($d in @("$vs\VC\Tools\MSVC", "$vs\VC\Redist\MSVC")) {
+            $all = Get-ChildItem $d -Directory | Where-Object { $_.Name -match '^14\.\d+\.\d+$' } | Sort-Object { [version]$_.Name }
+            "$d : " + (($all | ForEach-Object Name) -join ', ')
+            $all | Select-Object -SkipLast 1 | ForEach-Object { Rename-Item $_.FullName ("old-" + $_.Name) }
+          }
+      - name: Package
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          python depot_tools\win_toolchain\package_from_installed.py 2026 -w 10.0.28000.0
+          Get-ChildItem *.zip | Select-Object Name, Length
+      - name: Encrypt (public repo — Microsoft files must not be readable by others)
+        shell: bash
+        run: |
+          cat > pub.pem <<'EOF'
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAvcZynfb7PdG+xTZ9enI4
+          BQU/bKm34+5snb9kxDafk1OoAx6gsVDJqUi/K48UtJSOpbVY9hHsr7kIyZAwrEY8
+          tiho4hOcEjLaVYxpqKw463l1VD+WFUFqrRvmaY4cNGWLcf8HHJKo6lLwb78p/6xe
+          sutfduAFak+ChnAqRbSk0VLdbP+txq20uMTxXRqXgeJWAtNrTavf29qZfWc1Y39a
+          GFD3VuJYjFLE4PG73MWPhhiGsQxmN9/eISl+heybqWLoZnzU4ghwvZ4FoOOyYJ1W
+          aDMD3aejyfrd83sb9KRvpLDAo+6oJMziuir880ukbOPDV1xQoxUaki3fYnepKAsN
+          feD6c9Ua+KnoRn7JnDH1VA6veiB1IOwVKfqvNk7X11osHry0WNmOULS+9Ur2/38o
+          mG/w7k8Ri7ym5VbxZCKCaAK6SeMIm8m8p2MreA+d2NYh9tC1J4IiuEcn1Yik3pMw
+          8maLywB44Fixiv9qSrWGEYWM5TLP2M1yoPYg6uxB3NSZAgMBAAE=
+          -----END PUBLIC KEY-----
+          EOF
+          Z=$(ls *.zip | head -1); echo "$Z" > name.txt
+          sha256sum "$Z" | cut -d' ' -f1 > zip.sha256
+          K=$(openssl rand -hex 32)
+          openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -pass "pass:$K" -in "$Z" -out tc.enc
+          printf '%s' "$K" | openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -out key.bin
+          rm -f "$Z"; unset K
+          ls -la tc.enc key.bin name.txt zip.sha256; cat name.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-toolchain-enc
+          path: |
+            tc.enc
+            key.bin
+            name.txt
+            zip.sha256
+          retention-days: 30
+          compression-level: 0
