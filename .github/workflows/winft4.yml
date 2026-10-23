@@ -1,0 +1,49 @@
+name: winft4
+on: workflow_dispatch
+jobs:
+  sw:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install r107
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          gh release download 155.0.8059.85-r107 -R smilemino/unchore-browser-releases -p '*-setup.exe' -O setup107.exe
+          $p = Start-Process .\setup107.exe -ArgumentList '--do-not-launch-chrome' -Wait -PassThru
+          "SETUP107_RC=$($p.ExitCode)"
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          "EXE=$(Join-Path $A 'chrome.exe')" | Out-File -Append $env:GITHUB_ENV
+          "EXTDIR=$(Join-Path $A '155.0.8059.107\Extensions\unchore-assistant')" | Out-File -Append $env:GITHUB_ENV
+      - name: A first tag A
+        shell: pwsh
+        working-directory: winft
+        run: |
+          (Get-Content firsttab-debug2.js -Raw).Replace("'|ok=' + ok", "'|tag=A|ok=' + ok") | Set-Content "$env:EXTDIR\firsttab.js" -NoNewline
+          node ft3.js A 2 exe
+      - name: V4 version bump only 0.4.1, tag V4
+        shell: pwsh
+        working-directory: winft
+        run: |
+          (Get-Content firsttab-debug2.js -Raw).Replace("'|ok=' + ok", "'|tag=V4|ok=' + ok") | Set-Content "$env:EXTDIR\firsttab.js" -NoNewline
+          $m = "$env:EXTDIR\manifest.json"; (Get-Content $m -Raw).Replace('"version": "0.4.0"', '"version": "0.4.1"') | Set-Content $m -NoNewline
+          Select-String -Path $m -Pattern '"version"|service_worker' | ForEach-Object { "MANI $($_.Line)" }
+          node ft3.js V4 2 exe
+      - name: V1 service worker file renamed (background-r108.js), version 0.4.2, tag V1
+        shell: pwsh
+        working-directory: winft
+        run: |
+          (Get-Content firsttab-debug2.js -Raw).Replace("'|ok=' + ok", "'|tag=V1|ok=' + ok") | Set-Content "$env:EXTDIR\firsttab.js" -NoNewline
+          Copy-Item "$env:EXTDIR\background.js" "$env:EXTDIR\background-r108.js"
+          $m = "$env:EXTDIR\manifest.json"; (Get-Content $m -Raw).Replace('"version": "0.4.1"', '"version": "0.4.2"').Replace('"service_worker": "background.js"', '"service_worker": "background-r108.js"') | Set-Content $m -NoNewline
+          Select-String -Path $m -Pattern '"version"|service_worker' | ForEach-Object { "MANI $($_.Line)" }
+          node ft3.js V1 3 exe
+      - name: V6 sw folder listing
+        shell: pwsh
+        run: |
+          $sw = Join-Path $env:LOCALAPPDATA 'Unchore Browser\User Data\Default\Service Worker'
+          Get-ChildItem -Recurse $sw -ErrorAction SilentlyContinue | Select-Object -First 30 | ForEach-Object { "SWFILE $($_.FullName.Replace($sw,'')) $($_.Length)" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: shots-sw, path: "winft/shots/*.png" }
