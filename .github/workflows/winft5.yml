@@ -1,0 +1,57 @@
+name: winft5
+on: workflow_dispatch
+jobs:
+  upgrade:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install r106 then use it
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          gh release download 155.0.8059.85-r106 -R smilemino/unchore-browser-releases -p '*-setup.exe' -O setup106.exe
+          gh release download 155.0.8059.85-r107 -R smilemino/unchore-browser-releases -p '*-setup.exe' -O setup107.exe
+          $p = Start-Process .\setup106.exe -ArgumentList '--do-not-launch-chrome' -Wait -PassThru
+          "SETUP106_RC=$($p.ExitCode)"
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          "EXE=$(Join-Path $A 'chrome.exe')" | Out-File -Append $env:GITHUB_ENV
+          Get-ChildItem $A | ForEach-Object { "APPDIR $($_.Name)" }
+      - name: U0 r106 default profile
+        shell: pwsh
+        working-directory: winft
+        run: node ft3.js U0 2 exe
+      - name: Upgrade to r107 (real file, untouched) and use it
+        shell: pwsh
+        working-directory: winft
+        run: |
+          $p = Start-Process ..\setup107.exe -ArgumentList '--do-not-launch-chrome' -Wait -PassThru
+          "SETUP107_RC=$($p.ExitCode)"
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          Get-ChildItem $A | ForEach-Object { "APPDIR $($_.Name)" }
+          node ft3.js U1 2 exe
+      - name: W1 sw renamed background-r108.js, version 0.4.1
+        shell: pwsh
+        working-directory: winft
+        run: |
+          $ext = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application\155.0.8059.107\Extensions\unchore-assistant'
+          (Get-Content firsttab-debug2.js -Raw).Replace("'|ok=' + ok", "'|tag=W1|ok=' + ok") | Set-Content "$ext\firsttab.js" -NoNewline
+          Copy-Item "$ext\background.js" "$ext\background-r108.js"
+          $m = "$ext\manifest.json"; (Get-Content $m -Raw).Replace('"version": "0.4.0"', '"version": "0.4.1"').Replace('"service_worker": "background.js"', '"service_worker": "background-r108.js"') | Set-Content $m -NoNewline
+          Select-String -Path $m -Pattern '"version"|service_worker' | ForEach-Object { "MANI $($_.Line)" }
+          node ft3.js W1 5 exe
+          node ft3.js W1lnk 2 lnk
+      - name: W2 sw renamed background-r109.js, version 0.4.2
+        shell: pwsh
+        working-directory: winft
+        run: |
+          $ext = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application\155.0.8059.107\Extensions\unchore-assistant'
+          (Get-Content firsttab-debug2.js -Raw).Replace("'|ok=' + ok", "'|tag=W2|ok=' + ok") | Set-Content "$ext\firsttab.js" -NoNewline
+          Copy-Item "$ext\background.js" "$ext\background-r109.js"
+          $m = "$ext\manifest.json"; (Get-Content $m -Raw).Replace('"version": "0.4.1"', '"version": "0.4.2"').Replace('"service_worker": "background-r108.js"', '"service_worker": "background-r109.js"') | Set-Content $m -NoNewline
+          Select-String -Path $m -Pattern '"version"|service_worker' | ForEach-Object { "MANI $($_.Line)" }
+          node ft3.js W2 3 exe
+          node ft3.js W2lnk 2 lnk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: shots-upgrade5, path: "winft/shots/*.png" }
