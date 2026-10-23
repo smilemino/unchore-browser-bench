@@ -1,0 +1,48 @@
+name: winft
+on: workflow_dispatch
+jobs:
+  ft:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install r107
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          gh release download 155.0.8059.85-r107 -R smilemino/unchore-browser-releases -p '*-setup.exe' -O setup.exe
+          $p = Start-Process .\setup.exe -ArgumentList '--do-not-launch-chrome' -Wait -PassThru
+          "SETUP_RC=$($p.ExitCode)"
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          $exe = Join-Path $A 'chrome.exe'
+          if (-not (Test-Path $exe)) { $exe = (Get-ChildItem -Recurse $env:LOCALAPPDATA,"C:\Program Files" -Filter chrome.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'Unchore' } | Select-Object -First 1).FullName }
+          "EXE=$exe" | Out-File -Append $env:GITHUB_ENV
+          $ext = (Get-ChildItem -Recurse (Split-Path $exe) -Directory -Filter unchore-assistant | Select-Object -First 1).FullName
+          "EXTDIR=$ext" | Out-File -Append $env:GITHUB_ENV
+          "CHK_EXE=$exe CHK_EXT=$ext"
+          Get-ChildItem $ext | ForEach-Object { "EXTFILE $($_.Name) $($_.Length)" }
+          Copy-Item "$ext\firsttab.js" orig-firsttab.js
+          cd winft; npm i puppeteer-core@24 --silent | Out-Null
+      - name: P0 original
+        shell: pwsh
+        working-directory: winft
+        run: node ft.js orig C:\p0 4 nocdp
+      - name: P1 debug log
+        shell: pwsh
+        working-directory: winft
+        run: |
+          Copy-Item firsttab-debug.js "$env:EXTDIR\firsttab.js" -Force
+          node ft.js dbg C:\p1 4
+      - name: P2 fix
+        shell: pwsh
+        working-directory: winft
+        run: |
+          if (Test-Path fix) {
+            Copy-Item fix\* "$env:EXTDIR\" -Force
+            node ft.js fix C:\p2 11
+            node ft.js fixplain C:\p3 3 allnocdp
+            node ft.js fixfresh C:\p4 1 nofirstrun
+          } else { "NO_FIX" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: shots, path: "winft/shots/*.png" }
