@@ -1,0 +1,59 @@
+name: winft2
+on: workflow_dispatch
+jobs:
+  ft:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install r104 (old version, like the owner's PC before)
+        shell: pwsh
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          gh release download 155.0.8059.85-r104 -R smilemino/unchore-browser-releases -p '*-setup.exe' -O setup104.exe
+          gh release download 155.0.8059.85-r107 -R smilemino/unchore-browser-releases -p '*-setup.exe' -O setup107.exe
+          $p = Start-Process .\setup104.exe -ArgumentList '--do-not-launch-chrome' -Wait -PassThru
+          "SETUP104_RC=$($p.ExitCode)"
+          cd winft; npm i puppeteer-core@24 --silent | Out-Null
+      - name: C1 r104 via shortcut (default profile)
+        shell: pwsh
+        working-directory: winft
+        run: node ft2.js up104 default 2 lnk firstrun
+      - name: Upgrade to r107 and put debug firsttab
+        shell: pwsh
+        run: |
+          $p = Start-Process .\setup107.exe -ArgumentList '--do-not-launch-chrome' -Wait -PassThru
+          "SETUP107_RC=$($p.ExitCode)"
+          $A = Join-Path $env:LOCALAPPDATA 'Unchore Browser\Application'
+          Get-ChildItem $A | ForEach-Object { "APPDIR $($_.Name)" }
+          $exe = Join-Path $A 'chrome.exe'
+          "EXE=$exe" | Out-File -Append $env:GITHUB_ENV
+          $ext = Join-Path $A '155.0.8059.107\Extensions\unchore-assistant'
+          "EXTDIR=$ext" | Out-File -Append $env:GITHUB_ENV
+          "CHK_EXE=$exe CHK_EXT=$ext $(Test-Path $ext)"
+          Copy-Item winft\firsttab-debug2.js "$ext\firsttab.js" -Force
+      - name: C2 upgraded r107 via shortcut (default profile)
+        shell: pwsh
+        working-directory: winft
+        run: node ft2.js up107 default 6 lnk
+      - name: A fresh profile, no CDP
+        shell: pwsh
+        working-directory: winft
+        run: node ft2.js plain C:\pa 7 exe firstrun
+      - name: B restore last session
+        shell: pwsh
+        working-directory: winft
+        run: node ft2.js restore C:\pb 5 exe restore
+      - name: D fix
+        shell: pwsh
+        working-directory: winft
+        run: |
+          if (Test-Path fix) {
+            Copy-Item fix\* "$env:EXTDIR\" -Force
+            node ft2.js fixplain C:\pd 11 exe firstrun
+            node ft2.js fixrestore C:\pe 5 exe restore
+            node ft2.js fixup default 5 lnk
+          } else { "NO_FIX" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: shots, path: "winft/shots/*.png" }
